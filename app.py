@@ -4,27 +4,29 @@ import unicodedata
 from pypdf import PdfReader
 import io
 
-st.set_page_config(page_title="فرز السير الذاتية - HR Filter", page_icon="🗂️")
+# ========= إعداد الصفحة =========
+st.set_page_config(page_title="فرز السير الذاتية - HR Filter", page_icon="🗂️", layout="centered")
 st.title("🗂️ برنامج فرز السير الذاتية (نسخة تجريبية)")
-st.write("يتحقق من: **جامعة الملك سعود** + **نظم المعلومات الإدارية** + **الجنسية السعودية**")
+st.caption("يتحقق من: **جامعة الملك سعود** + **نظم المعلومات الإدارية** + **الجنسية السعودية**")
 
-# --------- Utilities ---------
+# ========= أدوات مساعدة =========
 def normalize_ar(text: str) -> str:
+    """تطبيع بسيط للنص العربي/الإنجليزي لتقليل أخطاء المطابقة."""
     if not text:
         return ""
-    # lowercase
     text = text.lower()
-    # remove diacritics
+    # إزالة التشكيل
     text = ''.join(ch for ch in unicodedata.normalize('NFKD', text) if not unicodedata.combining(ch))
-    # normalize common Arabic letters
+    # توحيد بعض الحروف
     text = re.sub(r"[أإآٱ]", "ا", text)
     text = text.replace("ة", "ه").replace("ى", "ي")
-    # remove extra spaces/punct
+    # مسافات وعلامات زائدة
     text = re.sub(r"[^0-9a-z\u0600-\u06FF\s]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 def extract_pdf_text(file_bytes: bytes) -> str:
+    """قراءة نص الـ PDF (بدون OCR)."""
     reader = PdfReader(io.BytesIO(file_bytes))
     pages = []
     for p in reader.pages:
@@ -34,51 +36,83 @@ def extract_pdf_text(file_bytes: bytes) -> str:
             pages.append("")
     return "\n".join(pages)
 
-# --------- Rule Set (بسيطة وواضحة) ---------
+# ========= أنماط البحث (قواعد) =========
+# جامعة الملك سعود
 UNI_PATTERNS = [
-    r"\bجامعه?\s+الملك\s+سعود\b",      
-    r"\bking\s+saud\s+university\b",     
+    r"\bجامعه?\s+الملك\s+سعود\b",
+    r"\bking\s+saud\s+university\b",
     r"\bksu\b"
 ]
+
+# نظم المعلومات الإدارية (مرادفات شائعة)
 MAJOR_PATTERNS = [
-    r"\bنظم\s+المعلومات\s+الاداري[ه|ة]\b",
+    r"\bنظم\s+المعلومات\s+الاداري(?:ه|ة)?\b",
+    r"\bاداره?\s+نظم\s+معلومات\b",
     r"\bmis\b",
     r"\bmanagement\s+information\s+systems?\b"
 ]
+
+# الجنسية السعودية
 NAT_PATTERNS = [
-    r"\bسعودي(ه)?\b",
-    r"\bsaudi( arabia| national)?\b"
+    r"\bسعودي(?:ه)?\b",
+    r"\bsaudi(?:\s+(?:arabia|national))?\b"
 ]
 
-def match_any(patterns, text):
-    return any(re.search(p, text) for p in patterns)
+def find_matches(patterns, text):
+    """يرجع: موجود/غير موجود + قائمة بالألفاظ التي وُجدت فعلاً."""
+    hits = []
+    for p in patterns:
+        for m in re.findall(p, text, flags=re.IGNORECASE):
+            if isinstance(m, tuple):
+                # لو الرجكس فيه مجموعات، نحولها لنص واحد
+                m = " ".join([x for x in m if isinstance(x, str)])
+            hits.append(m if isinstance(m, str) else "")
+    # تنظيف النتائج
+    hits = [h.strip() for h in hits if h and h.strip()]
+    return (len(hits) > 0), hits
 
-def evaluate_cv(text_raw: str):
-    text = normalize_ar(text_raw)
-    uni_ok   = match_any(UNI_PATTERNS, text)
-    major_ok = match_any(MAJOR_PATTERNS, text)
-    nat_ok   = match_any(NAT_PATTERNS, text)
+def evaluate_cv(raw_text: str):
+    """يرجع النتيجة النهائية + تفصيل الشروط + الألفاظ المطابقة."""
+    norm = normalize_ar(raw_text)
+    uni_ok, uni_hits   = find_matches(UNI_PATTERNS,   norm)
+    major_ok, major_hits = find_matches(MAJOR_PATTERNS, norm)
+    nat_ok, nat_hits   = find_matches(NAT_PATTERNS,   norm)
 
     all_ok = uni_ok and major_ok and nat_ok
-    verdict = "✅ صح (مطابق للشروط)" if all_ok else "❌ خطأ (غير مطابق)"
-    reasons = []
-    reasons.append(f"الجامعة: {'✅ موجود' if uni_ok else '❌ غير موجود'}")
-    reasons.append(f"التخصص: {'✅ موجود' if major_ok else '❌ غير موجود'}")
-    reasons.append(f"الجنسية: {'✅ موجود' if nat_ok else '❌ غير موجود'}")
-    return verdict, reasons
+    verdict = "✅ مطابق للشروط" if all_ok else "❌ غير مطابق"
 
-# --------- UI ---------
-tab1, tab2 = st.tabs(["تحقق من سيرة ذاتية واحدة", "عدة سير ذاتية (تجربة سريعة)"])
+    detail = [
+        ("الجامعة", uni_ok, uni_hits),
+        ("التخصص", major_ok, major_hits),
+        ("الجنسية", nat_ok, nat_hits),
+    ]
+    return verdict, detail, norm
 
-with tab1:
-    st.subheader("ادخلي النص مباشرة أو ارفعي PDF")
-    cv_text = st.text_area("ألصقي نص السيرة الذاتية هنا:", height=200, placeholder="الاسم ... الجامعة ... التخصص ... الجنسية ...")
-    uploaded = st.file_uploader("أو ارفعي ملف PDF", type=["pdf"])
+def render_detail(detail):
+    """يعرض تفصيل الشروط + الألفاظ المطابقة بشكل واضح."""
+    for label, ok, hits in detail:
+        st.write(f"**{label}:** {'✅ موجود' if ok else '❌ غير موجود'}")
+        if hits:
+            with st.expander(f"الألفاظ التي تم العثور عليها في {label}"):
+                for h in sorted(set(hits)):
+                    st.code(h, language="text")
 
-    if st.button("تحقّق الآن"):
-        if uploaded and not cv_text.strip():
+# ========= الواجهة =========
+tab_single, tab_multi, tab_samples = st.tabs(["تحقق من سيرة واحدة", "تحقق من عدة ملفات", "أمثلة جاهزة"])
+
+# --- تبويب: سيرة واحدة ---
+with tab_single:
+    st.subheader("أدخلي نص السيرة أو ارفعي PDF")
+    col1, col2 = st.columns(2)
+    with col1:
+        cv_text = st.text_area("نص السيرة الذاتية (اختياري إذا سترفعين PDF)", height=220, placeholder="الاسم ... الجامعة ... التخصص ... الجنسية ...")
+    with col2:
+        one_file = st.file_uploader("أو ارفعي ملف PDF واحد", type=["pdf"], accept_multiple_files=False)
+
+    if st.button("تحقّق الآن", type="primary"):
+        if one_file and not cv_text.strip():
             try:
-                raw = extract_pdf_text(uploaded.read())
+                raw = extract_pdf_text(one_file.read())
             except Exception as e:
                 st.error(f"تعذّر قراءة الـ PDF: {e}")
                 raw = ""
@@ -86,27 +120,50 @@ with tab1:
             raw = cv_text
 
         if not raw.strip():
-            st.warning("فضلاً ضعي نصاً أو ارفعي PDF.")
+            st.warning("فضلاً أدخلي نصًا أو ارفعي ملف PDF.")
         else:
-            verdict, reasons = evaluate_cv(raw)
-            st.markdown(f"### النتيجة: {verdict}")
-            st.write("**التفصيل:**")
-            for r in reasons:
-                st.write("- " + r)
+            verdict, detail, norm = evaluate_cv(raw)
+            st.markdown(f"### النتيجة النهائية: {verdict}")
+            render_detail(detail)
+            with st.expander("عرض النص الذي تم تحليله"):
+                st.text(raw)
 
-with tab2:
-    st.subheader("اختبار سريع بعينات (نصوص قصيرة)")
-    sample_1 = "الجامعه: جامعة الملك سعود\nالتخصص: نظم المعلومات الادارية\nالجنسيه: سعوديه"
-    sample_2 = "University: King Saud University\nMajor: MIS\nNationality: Saudi"
-    sample_3 = "الجامعة: جامعة الملك خالد\nالتخصص: محاسبة\nالجنسية: غير سعودي"
+# --- تبويب: عدة ملفات ---
+with tab_multi:
+    st.subheader("ارفعي عدة ملفات PDF وسيتم التحقق من كل ملف")
+    files = st.file_uploader("ارفعي ملفات PDF", type=["pdf"], accept_multiple_files=True)
 
-    col1, col2, col3 = st.columns(3)
-    for i, s in enumerate([sample_1, sample_2, sample_3], start=1):
-        with [col1, col2, col3][i-1]:
-            st.code(s, language="text")
-            v, rs = evaluate_cv(s)
-            st.write(f"**النتيجة:** {v}")
-            for r in rs:
-                st.caption(r)
+    if st.button("تحقّق من جميع الملفات", type="secondary"):
+        if not files:
+            st.warning("فضلاً ارفعي ملفًا واحدًا على الأقل.")
+        else:
+            for idx, f in enumerate(files, start=1):
+                st.divider()
+                st.write(f"**الملف {idx}:** `{f.name}`")
+                try:
+                    raw = extract_pdf_text(f.read())
+                except Exception as e:
+                    st.error(f"تعذّر قراءة `{f.name}`: {e}")
+                    continue
 
-st.caption("نسخة تجريبية — المطابقة تعتمد على النص المستخرج؛ دقة PDF تتأثر بطريقة كتابة الملف.")
+                verdict, detail, norm = evaluate_cv(raw)
+                st.markdown(f"**النتيجة:** {verdict}")
+                render_detail(detail)
+
+# --- تبويب: أمثلة جاهزة ---
+with tab_samples:
+    st.subheader("تجربة بعينات نصية")
+    samples = [
+        ("عينة 1 (يجب أن تكون ✅)", "الجامعه: جامعة الملك سعود\nالتخصص: نظم المعلومات الاداريه\nالجنسيه: سعوديه"),
+        ("عينة 2 (يجب أن تكون ✅)", "University: King Saud University\nMajor: MIS\nNationality: Saudi"),
+        ("عينة 3 (يجب أن تكون ❌)", "الجامعة: جامعة الملك خالد\nالتخصص: محاسبة\nالجنسية: غير سعودي"),
+    ]
+    for title, s in samples:
+        st.write(f"**{title}**")
+        st.code(s, language="text")
+        v, d, _ = evaluate_cv(s)
+        st.write(f"النتيجة: {v}")
+        render_detail(d)
+        st.divider()
+
+st.caption("🔎 ملاحظة: إذا كان الـ PDF عبارة عن صورة ممسوحة (بدون نص)، قد تحتاجين لاحقًا لإضافة OCR. النسخة الحالية لا تستخدم OCR عمدًا لتسهيل النشر.")
