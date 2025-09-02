@@ -1,119 +1,112 @@
 import streamlit as st
-import pandas as pd
 import re
-from fuzzywuzzy import fuzz
+import unicodedata
 from pypdf import PdfReader
-# ==============================
-# 1) دوال مساعدة لمعالجة النص
-# ==============================
-def normalize_arabic(s: str) -> str:
-    if not s:
+import io
+
+st.set_page_config(page_title="فرز السير الذاتية - HR Filter", page_icon="🗂️")
+st.title("🗂️ برنامج فرز السير الذاتية (نسخة تجريبية)")
+st.write("يتحقق من: **جامعة الملك سعود** + **نظم المعلومات الإدارية** + **الجنسية السعودية**")
+
+# --------- Utilities ---------
+def normalize_ar(text: str) -> str:
+    if not text:
         return ""
-    s = re.sub(r'[\u0617-\u061A\u064B-\u0652\u0670]', '', s)
-    s = s.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
-    s = s.replace('ى', 'ي').replace('يٰ', 'ي')
-    s = s.replace('ؤ', 'و').replace('ئ', 'ي')
-    s = s.replace('ة', 'ه')
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
+    # lowercase
+    text = text.lower()
+    # remove diacritics
+    text = ''.join(ch for ch in unicodedata.normalize('NFKD', text) if not unicodedata.combining(ch))
+    # normalize common Arabic letters
+    text = re.sub(r"[أإآٱ]", "ا", text)
+    text = text.replace("ة", "ه").replace("ى", "ي")
+    # remove extra spaces/punct
+    text = re.sub(r"[^0-9a-z\u0600-\u06FF\s]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
-def keep_arabic_space(s: str) -> str:
-    return re.sub(r'[^\u0600-\u06FF ]+', ' ', s)
+def extract_pdf_text(file_bytes: bytes) -> str:
+    reader = PdfReader(io.BytesIO(file_bytes))
+    pages = []
+    for p in reader.pages:
+        try:
+            pages.append(p.extract_text() or "")
+        except Exception:
+            pages.append("")
+    return "\n".join(pages)
 
-def per_word_scores(phrase: str, text: str):
-    words = [w for w in normalize_arabic(phrase).lower().split() if w]
-    scores = [fuzz.partial_ratio(w, text) for w in words]
-    return words, scores
+# --------- Rule Set (بسيطة وواضحة) ---------
+UNI_PATTERNS = [
+    r"\bجامعه?\s+الملك\s+سعود\b",      
+    r"\bking\s+saud\s+university\b",     
+    r"\bksu\b"
+]
+MAJOR_PATTERNS = [
+    r"\bنظم\s+المعلومات\s+الاداري[ه|ة]\b",
+    r"\bmis\b",
+    r"\bmanagement\s+information\s+systems?\b"
+]
+NAT_PATTERNS = [
+    r"\bسعودي(ه)?\b",
+    r"\bsaudi( arabia| national)?\b"
+]
 
-# ==============================
-# 2) دوال التحقق
-# ==============================
-def decide_university(phrase: str, text: str, thresh: int = 60):
-    words, scores = per_word_scores(phrase, text)
-    avg = (sum(scores)/len(scores)) if scores else 0
-    min_word = min(scores) if scores else 0
-    return (avg >= thresh or min_word >= thresh)
+def match_any(patterns, text):
+    return any(re.search(p, text) for p in patterns)
 
-def decide_major(phrase: str, text: str, thresh: int = 60):
-    words = [w for w in normalize_arabic(phrase).lower().split() if w]
-    found_count = 0
-    for w in words:
-        sc = fuzz.partial_ratio(w, text)
-        if sc >= thresh:
-            found_count += 1
-    if len(words) >= 3:
-        need = 2
-    else:
-        need = len(words)
-    return found_count >= need
+def evaluate_cv(text_raw: str):
+    text = normalize_ar(text_raw)
+    uni_ok   = match_any(UNI_PATTERNS, text)
+    major_ok = match_any(MAJOR_PATTERNS, text)
+    nat_ok   = match_any(NAT_PATTERNS, text)
 
-def gen_nat_variants(word: str):
-    w = normalize_arabic(word).lower()
-    vars_ = {w}
-    if w.startswith('ال'): vars_.add(w[2:])
-    if w.endswith('ي'): vars_.add(w + 'ه')   # سعودي -> سعوديه
-    if w.endswith('يه'): vars_.add(w[:-1])   # سعوديه -> سعودي
-    return list(vars_)
+    all_ok = uni_ok and major_ok and nat_ok
+    verdict = "✅ صح (مطابق للشروط)" if all_ok else "❌ خطأ (غير مطابق)"
+    reasons = []
+    reasons.append(f"الجامعة: {'✅ موجود' if uni_ok else '❌ غير موجود'}")
+    reasons.append(f"التخصص: {'✅ موجود' if major_ok else '❌ غير موجود'}")
+    reasons.append(f"الجنسية: {'✅ موجود' if nat_ok else '❌ غير موجود'}")
+    return verdict, reasons
 
-def decide_nationality(phrase: str, text: str, thresh: int = 70):
-    base = [w for w in normalize_arabic(phrase).lower().split() if w]
-    cands = set()
-    for w in base:
-        for v in gen_nat_variants(w):
-            cands.add(v)
-    scores = {w: fuzz.partial_ratio(w, text) for w in cands}
-    return any(s >= thresh for s in scores.values())
+# --------- UI ---------
+tab1, tab2 = st.tabs(["تحقق من سيرة ذاتية واحدة", "عدة سير ذاتية (تجربة سريعة)"])
 
-# ==============================
-# 3) واجهة المستخدم
-# ==============================
-st.set_page_config(page_title="صفوة - فلترة السير الذاتية", layout="centered")
+with tab1:
+    st.subheader("ادخلي النص مباشرة أو ارفعي PDF")
+    cv_text = st.text_area("ألصقي نص السيرة الذاتية هنا:", height=200, placeholder="الاسم ... الجامعة ... التخصص ... الجنسية ...")
+    uploaded = st.file_uploader("أو ارفعي ملف PDF", type=["pdf"])
 
-st.title("📄 صفوة - فلترة السير الذاتية")
+    if st.button("تحقّق الآن"):
+        if uploaded and not cv_text.strip():
+            try:
+                raw = extract_pdf_text(uploaded.read())
+            except Exception as e:
+                st.error(f"تعذّر قراءة الـ PDF: {e}")
+                raw = ""
+        else:
+            raw = cv_text
 
-# إدخال المستخدم
-st.sidebar.header("⚙️ خيارات الفلترة")
-uni_input = st.sidebar.text_input("ادخل اسم الجامعة", "جامعة الملك سعود")
-major_input = st.sidebar.text_input("ادخل اسم التخصص", "نظم المعلومات الادارية")
-nat_input = st.sidebar.text_input("ادخل الجنسية", "سعودي / سعودية")
+        if not raw.strip():
+            st.warning("فضلاً ضعي نصاً أو ارفعي PDF.")
+        else:
+            verdict, reasons = evaluate_cv(raw)
+            st.markdown(f"### النتيجة: {verdict}")
+            st.write("**التفصيل:**")
+            for r in reasons:
+                st.write("- " + r)
 
-uploaded_files = st.file_uploader("✨ ارفع ملفات السير الذاتية (PDF)", type="pdf", accept_multiple_files=True)
+with tab2:
+    st.subheader("اختبار سريع بعينات (نصوص قصيرة)")
+    sample_1 = "الجامعه: جامعة الملك سعود\nالتخصص: نظم المعلومات الادارية\nالجنسيه: سعوديه"
+    sample_2 = "University: King Saud University\nMajor: MIS\nNationality: Saudi"
+    sample_3 = "الجامعة: جامعة الملك خالد\nالتخصص: محاسبة\nالجنسية: غير سعودي"
 
-if st.button("تشغيل الفلتر الآن"):
-    if not uploaded_files:
-        st.warning("⚠️ الرجاء رفع ملفات PDF أولاً.")
-    else:
-        rows = []
-        for file in uploaded_files:
-            reader = PdfReader(file)
-            raw_text = ""
-            for page in reader.pages:
-                raw_text += page.extract_text() or ""
+    col1, col2, col3 = st.columns(3)
+    for i, s in enumerate([sample_1, sample_2, sample_3], start=1):
+        with [col1, col2, col3][i-1]:
+            st.code(s, language="text")
+            v, rs = evaluate_cv(s)
+            st.write(f"**النتيجة:** {v}")
+            for r in rs:
+                st.caption(r)
 
-            text_norm = normalize_arabic(keep_arabic_space(raw_text)).lower()
-
-            uni_found = decide_university(uni_input, text_norm)
-            major_found = decide_major(major_input, text_norm)
-            nat_found = decide_nationality(nat_input, text_norm)
-
-            status = "✅ مقبول" if (uni_found and major_found and nat_found) else "❌ مرفوض"
-
-            rows.append({
-                "الملف": file.name,
-                "الجامعة": "صح" if uni_found else "خطأ",
-                "التخصص": "صح" if major_found else "خطأ",
-                "الجنسية": "صح" if nat_found else "خطأ",
-                "الحالة": status
-            })
-
-        df = pd.DataFrame(rows)
-        st.subheader("📊 النتائج")
-        st.dataframe(df, use_container_width=True)
-
-        st.download_button(
-            "⬇️ تحميل النتائج كـ CSV",
-            df.to_csv(index=False, encoding="utf-8-sig"),
-            "results.csv",
-            "text/csv",
-            key="download-csv"
-        )
+st.caption("نسخة تجريبية — المطابقة تعتمد على النص المستخرج؛ دقة PDF تتأثر بطريقة كتابة الملف.")
