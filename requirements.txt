@@ -2,4 +2,4 @@ streamlit==1.37.0
 pypdf==5.0.0
 pandas==2.2.2
 openpyxl==3.1.5
-fuzzywuzzy==0.18.0
+repidfuzz==3.9.7
