@@ -3,4 +3,3 @@ pypdf==5.0.0
 pandas==2.2.2
 openpyxl==3.1.5
 fuzzywuzzy==0.18.0
-python-Levenshtein==0.25.1
