@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 from fuzzywuzzy import fuzz
-from PyPDF2 import PdfReader
-
+from pypdf import PdfReader
 # ==============================
 # 1) دوال مساعدة لمعالجة النص
 # ==============================
