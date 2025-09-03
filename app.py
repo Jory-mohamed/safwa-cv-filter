@@ -6,19 +6,52 @@ import pandas as pd
 
 # ===== إعداد الصفحة =====
 st.set_page_config(page_title="فلترة السير الذاتية", page_icon="🗂️", layout="wide")
-st.title("🗂️ فلترة السير الذاتية")
-st.caption("Version: 3.1.1 • يدعم PDF + Excel + CSV • عتبة ثابتة 80 • تصدير النتائج • دعم اللوقو")
 
-# ===== عرض اللوقو إن وُجد =====
-def show_logo():
+# ===== أنماط الواجهة (خلفية بيضاء + لوقو في الزاوية) =====
+st.markdown(
+    '''
+    <style>
+    /* خلفية بيضاء بالكامل */
+    .stApp, .block-container, body { background: #ffffff !important; }
+
+    /* لوقو صغير في الزاوية العليا (يمين للـ RTL) */
+    .corner-logo {
+        position: fixed;
+        top: 16px;
+        right: 16px; /* لو تبينه يسار: استبدلي بـ left: 16px; وامسحي right */
+        width: 84px; /* حجم قريب من لوقو الوزارات */
+        height: auto;
+        z-index: 1000;
+        opacity: 0.98;
+    }
+
+    /* صندوق نتيجة مرتب */
+    .result-ok   {background:#e8f5e9;border-left:6px solid #2e7d32;padding:12px 14px;border-radius:8px;margin:8px 0;}
+    .result-bad  {background:#ffebee;border-left:6px solid #c62828;padding:12px 14px;border-radius:8px;margin:8px 0;}
+
+    /* شارات */
+    .badge {display:inline-block;padding:4px 10px;border-radius:999px;font-size:13px;margin-right:6px}
+    .badge-ok {background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7}
+    .badge-bad{background:#ffebee;color:#b71c1c;border:1px solid #ef9a9a}
+    </style>
+    ''',
+    unsafe_allow_html=True
+)
+
+st.title("🗂️ فلترة السير الذاتية")
+st.caption("Version: 3.2 • خلفية بيضاء + لوقو في الزاوية • يدعم PDF + Excel + CSV • عتبة ثابتة 80 • تصدير النتائج")
+
+# ===== عرض اللوقو في الزاوية إن وُجد =====
+def show_corner_logo():
+    logo_path = None
     for path in ("logo.png", "assets/logo.png", "static/logo.png"):
         if os.path.exists(path):
-            try:
-                st.image(path, width=140)
-            except Exception:
-                pass
+            logo_path = path
             break
-show_logo()
+    if logo_path:
+        st.markdown(f'<img src="{logo_path}" class="corner-logo" />', unsafe_allow_html=True)
+
+show_corner_logo()
 
 # ===== أدوات مساعدة =====
 def normalize_ar(text: str) -> str:
@@ -43,6 +76,7 @@ def extract_pdf_text(file_bytes: bytes) -> str:
     return "\n".join(pages)
 
 def fuzzy_match(term: str, text: str, threshold: int = 80) -> (bool, int):
+    """مطابقة ذكية (Fuzzy) — العتبة ثابتة 80 داخل الاستدعاءات."""
     if not term or not term.strip():
         return None, 0
     norm_text = normalize_ar(text)
@@ -53,29 +87,29 @@ def fuzzy_match(term: str, text: str, threshold: int = 80) -> (bool, int):
     return (score >= threshold), int(score)
 
 # ===== التحقق =====
-def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req, threshold: int = 80):
+def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req):
     norm_text = normalize_ar(text_raw)
+    THRESH = 80  # عتبة ثابتة
 
     # الجامعة والجنسية: Fuzzy
-    uni_ok, uni_score = fuzzy_match(uni_req, norm_text, threshold)
-    nat_ok, nat_score = fuzzy_match(nat_req, norm_text, threshold)
+    uni_ok, uni_score = fuzzy_match(uni_req, norm_text, THRESH)
+    nat_ok, nat_score = fuzzy_match(nat_req, norm_text, THRESH)
 
     # التخصص: Fuzzy + مرادفات + كلمات أساسية
-    major_ok, major_score = fuzzy_match(major_req, norm_text, threshold)
+    major_ok, major_score = fuzzy_match(major_req, norm_text, THRESH)
     syn_hits = []
-
     if major_syn.strip():
         for s in major_syn.split(","):
             term = s.strip()
             if not term:
                 continue
-            ok, score = fuzzy_match(term, norm_text, threshold)
+            ok, score = fuzzy_match(term, norm_text, THRESH)
             if ok:
                 major_ok = True
                 major_score = max(major_score, score)
                 syn_hits.append(f"{term} (score={score})")
 
-    # كلمات أساسية
+    # كلمات أساسية عربية للتخصص (تقلل قبول الغلط)
     base_keywords = ["نظم", "معلومات"]
     kw_hits = [kw for kw in base_keywords if kw in norm_text]
     if len(kw_hits) >= 2:
@@ -99,16 +133,15 @@ def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req, threshold
     }
     return verdict, detail
 
-# ===== خانات المتطلبات =====
+# ===== خانات المتطلبات (Sidebar) =====
 st.sidebar.header("⚙️ إعداد المتطلبات")
-uni_req = st.sidebar.text_input("🏫 الجامعة المطلوبة", "جامعة الملك سعود")
+uni_req   = st.sidebar.text_input("🏫 الجامعة المطلوبة", "جامعة الملك سعود")
 major_req = st.sidebar.text_input("📚 التخصص المطلوب", "نظم المعلومات الإدارية")
 major_syn = st.sidebar.text_input("مرادفات التخصص (اختياري)", "إدارة نظم معلومات, MIS, Management Information Systems")
-nat_req = st.sidebar.text_input("🌍 الجنسية المطلوبة", "سعودي")
+nat_req   = st.sidebar.text_input("🌍 الجنسية المطلوبة", "سعودي")
 
 # ===== التبويبات =====
 tab1, tab2, tab3 = st.tabs(["📂 رفع CVات PDF", "📊 رفع ملف Excel", "📑 رفع ملف CSV"])
-
 results = []
 
 # === تبويب 1: PDF ===
@@ -122,7 +155,16 @@ with tab1:
             for f in pdf_files:
                 raw = extract_pdf_text(f.read())
                 verdict, detail = evaluate_cv(raw, uni_req, major_req, major_syn, nat_req)
-                st.write(f"**📄 {f.name} → {verdict}**")
+                box_class = "result-ok" if "✅" in verdict else "result-bad"
+                st.markdown(f'<div class="{box_class}"><b>النتيجة:</b> {verdict} — {f.name}</div>', unsafe_allow_html=True)
+                chips = "".join([
+                    f'<span class="badge {"badge-ok" if detail["الجامعة"]=="✅" else "badge-bad"}">الجامعة: {detail["الجامعة"]} (score={detail["درجة الجامعة"]})</span>',
+                    f'<span class="badge {"badge-ok" if detail["التخصص"]=="✅" else "badge-bad"}">التخصص: {detail["التخصص"]} (score={detail["درجة التخصص"]})</span>',
+                    f'<span class="badge {"badge-ok" if detail["الجنسية"]=="✅" else "badge-bad"}">الجنسية: {detail["الجنسية"]} (score={detail["درجة الجنسية"]})</span>',
+                ])
+                st.markdown(chips, unsafe_allow_html=True)
+                if detail.get("مطابقات التخصص"):
+                    st.caption("مطابقات إضافية للتخصص: " + detail["مطابقات التخصص"])
                 results.append({"اسم الملف": f.name, "النتيجة": verdict, **detail})
 
 # === تبويب 2: Excel ===
@@ -137,7 +179,16 @@ with tab2:
             for idx, row in df.iterrows():
                 text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
                 verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req)
-                st.write(f"**📝 صف {idx+1} → {verdict}**")
+                box_class = "result-ok" if "✅" in verdict else "result-bad"
+                st.markdown(f'<div class="{box_class}"><b>صف {idx+1}:</b> {verdict}</div>', unsafe_allow_html=True)
+                chips = "".join([
+                    f'<span class="badge {"badge-ok" if detail["الجامعة"]=="✅" else "badge-bad"}">الجامعة: {detail["الجامعة"]} (score={detail["درجة الجامعة"]})</span>',
+                    f'<span class="badge {"badge-ok" if detail["التخصص"]=="✅" else "badge-bad"}">التخصص: {detail["التخصص"]} (score={detail["درجة التخصص"]})</span>',
+                    f'<span class="badge {"badge-ok" if detail["الجنسية"]=="✅" else "badge-bad"}">الجنسية: {detail["الجنسية"]} (score={detail["درجة الجنسية"]})</span>',
+                ])
+                st.markdown(chips, unsafe_allow_html=True)
+                if detail.get("مطابقات التخصص"):
+                    st.caption("مطابقات إضافية للتخصص: " + detail["مطابقات التخصص"])
                 results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
 
 # === تبويب 3: CSV ===
@@ -152,7 +203,16 @@ with tab3:
             for idx, row in df.iterrows():
                 text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
                 verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req)
-                st.write(f"**📝 صف {idx+1} → {verdict}**")
+                box_class = "result-ok" if "✅" in verdict else "result-bad"
+                st.markdown(f'<div class="{box_class}"><b>صف {idx+1}:</b> {verdict}</div>', unsafe_allow_html=True)
+                chips = "".join([
+                    f'<span class="badge {"badge-ok" if detail["الجامعة"]=="✅" else "badge-bad"}">الجامعة: {detail["الجامعة"]} (score={detail["درجة الجامعة"]})</span>',
+                    f'<span class="badge {"badge-ok" if detail["التخصص"]=="✅" else "badge-bad"}">التخصص: {detail["التخصص"]} (score={detail["درجة التخصص"]})</span>',
+                    f'<span class="badge {"badge-ok" if detail["الجنسية"]=="✅" else "badge-bad"}">الجنسية: {detail["الجنسية"]} (score={detail["درجة الجنسية"]})</span>',
+                ])
+                st.markdown(chips, unsafe_allow_html=True)
+                if detail.get("مطابقات التخصص"):
+                    st.caption("مطابقات إضافية للتخصص: " + detail["مطابقات التخصص"])
                 results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
 
 # ===== زر تحميل النتائج =====
