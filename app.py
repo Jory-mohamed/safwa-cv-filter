@@ -4,99 +4,103 @@ from pypdf import PdfReader
 from rapidfuzz import fuzz
 import pandas as pd
 
-# =============== إعداد الصفحة ===============
+# =========================
+# إعداد الصفحة
+# =========================
 st.set_page_config(page_title="فلترة السير الذاتية", page_icon=None, layout="wide")
 
-# =============== الثيم والتنسيق (مطابق للصورة) ===============
+# =========================
+# ثيم نهائي (أبيض + نيڤي + أخضر جديد) + إصلاحات اللوقو
+# =========================
 st.markdown("""
 <style>
 :root{
-  --bg:#ffffff;           /* خلفية بيضاء */
-  --navy:#0b2447;         /* نيڤي للعناوين والنصوص */
-  --muted:#475569;        /* وصف خفيف */
-  --line:#e2e8f0;         /* حدود رقيقة */
-  --green:#2e7d32;        /* زر أخضر رسمي */
-  --green-d:#1b5e20;      /* Hover */
-  --ok-bg:#e8f5e9; --ok-br:#2e7d32;
-  --bad-bg:#ffebee; --bad-br:#c62828;
+  --bg:#ffffff;
+  --navy:#0b2447;          /* النصوص */
+  --muted:#475569;
+  --line:#e5e7eb;
+  --green:#059669;         /* أخضر أنظف */
+  --green-h:#047857;
+  --ok-bg:#e8f5e9; --ok-br:#22c55e;
+  --bad-bg:#ffebee; --bad-br:#ef4444;
 }
 
-/* خلفية موحدة بيضاء لكل العناصر (لا تبقي سواد) */
-html, body, .stApp, .block-container, section[data-testid="stSidebar"]{
-  background: var(--bg) !important;
-}
+/* كل الخلفيات بيضاء — لا سواد */
+html, body, .stApp, .block-container, section[data-testid="stSidebar"]{ background: var(--bg) !important; }
 
-/* نصوص نيڤي */
-h1,h2,h3,h4,h5,h6,p,div,span,label,li,small,strong { color: var(--navy) !important; }
+/* كل النصوص نيڤي */
+h1,h2,h3,h4,h5,h6,p,div,span,label,li,small,strong{ color: var(--navy) !important; }
 
-/* اللوقو الصغير جداً بالزاوية العليا يمين */
-.corner{ position: fixed; top: 10px; right: 16px; z-index: 1000; opacity:.98; pointer-events:none; }
-.corner img{ width: 18px; height:auto; display:block; }  /* <— طلبك بالضبط */
+/* اللوقو — تثبيت بالحجم 24px مهما صار */
+.corner{ position: fixed; top: 10px; right: 16px; z-index: 1000; pointer-events:none; }
+.corner img{ width: 24px !important; height: auto !important; display: block; }
 
-/* عنوان مثل الصورة (يسار المحتوى) */
-.page-wrap{ max-width: 1100px; margin: 6px auto 10px auto; }
-.title{ font-size: 34px; font-weight: 800; margin: 6px 0 2px 0; color: var(--navy); }
-.subtitle{ font-size: 16px; font-weight:600; color: var(--navy); }
-.subsubtitle{ font-size: 13px; color: var(--muted); }
+/* رأس الصفحة */
+.page-wrap{ max-width: 1100px; margin: 8px auto 12px auto; }
+.title{ font-size: 34px; font-weight: 800; margin: 6px 0 2px 0; }
+.subtitle{ font-size: 16px; font-weight:600; }
+.subsubtitle{ font-size: 13px; color: var(--muted) !important; }
 
-/* بطاقة وسط لمدخلات الشروط */
+/* بطاقة وسط للمتطلبات (في النص) */
 .center-card{
-  max-width: 680px; margin: 10px auto; padding: 18px 20px;
+  max-width: 720px; margin: 10px auto; padding: 18px 20px;
   background: #f8fafc; border: 1px solid var(--line); border-radius: 14px;
 }
 
-/* مدخلات أنيقة */
+/* حقول */
 input, textarea, .stTextInput input, .stTextArea textarea{
   color: var(--navy) !important; background: #ffffff !important;
   border: 1px solid var(--line) !important; border-radius: 10px !important;
 }
 
-/* بطاقات رفع الملفات (على اليسار) بلون نيڤي ونص أبيض */
+/* بطاقات الرفع: نيڤي + نص أبيض (لا أسود) */
 .upl-card{
-  background: var(--navy); color: #fff;
-  border-radius: 14px; padding: 14px 14px 16px; border: 1px solid rgba(13,18,35,.08);
+  background:#0b2447; color:#fff; border-radius:14px; padding:14px 14px 16px;
+  border:1px solid rgba(255,255,255,.08);
 }
-.upl-card h3, .upl-card p, .upl-card div, .upl-card span, .upl-card label { color:#fff !important; }
+.upl-card *{ color:#fff !important; }
 .upl-card [data-testid="stFileUploader"] section{
   background: rgba(255,255,255,0.06) !important;
   border: 1px dashed rgba(255,255,255,0.35) !important;
   border-radius: 12px !important;
 }
 
-/* أزرار خضراء رسمية */
+/* أزرار خضراء جديدة */
 button[kind="primary"], .stDownloadButton>button{
   background: var(--green) !important; color: #fff !important; border: 0 !important; border-radius: 10px !important;
 }
-button[kind="primary"]:hover, .stDownloadButton>button:hover{ background: var(--green-d) !important; }
+button[kind="primary"]:hover, .stDownloadButton>button:hover{ background: var(--green-h) !important; }
 
 /* صناديق النتائج */
 .result-ok{ background: var(--ok-bg); border-left: 6px solid var(--ok-br); padding:12px 14px; border-radius:10px; margin:10px 0; }
 .result-bad{ background: var(--bad-bg); border-left: 6px solid var(--bad-br); padding:12px 14px; border-radius:10px; margin:10px 0; }
 
-/* جدول النتائج */
-[data-testid="stTable"], .stDataFrame, .stDataFrame div{ color: #111827 !important; }
+/* جدول النتائج مقروء */
+[data-testid="stTable"], .stDataFrame, .stDataFrame div{ color:#111827 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ===== اللوقو الصغير جداً (أعلى يمين) =====
+# ===== اللوقو (حجم صريح 24px) =====
 def show_corner_logo():
     for path in ("logo.png", "assets/logo.png", "static/logo.png"):
         if os.path.exists(path):
             st.markdown('<div class="corner">', unsafe_allow_html=True)
-            st.image(path, use_container_width=False)  # الحجم محدد في CSS (18px)
+            st.image(path, width=24)  # ← ضبط بالحجم مباشرة
             st.markdown('</div>', unsafe_allow_html=True)
             break
 show_corner_logo()
 
-# ===== رأس الصفحة كما في الصورة =====
+# ===== رأس الصفحة =====
 st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
 st.markdown('<div class="title">فلترة السير الذاتية الذكية</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">منصّة لفرز السير الذاتية</div>', unsafe_allow_html=True)
 st.markdown('<div class="subsubtitle">صفوة — فلتر للسير الذاتية الذكي</div>', unsafe_allow_html=True)
-st.caption("Version: 3.9")
+st.caption("Version: 4.0")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# =============== أدوات المطابقة ===============
+# =========================
+# أدوات المطابقة
+# =========================
 def normalize_ar(text: str) -> str:
     if not text: return ""
     text = text.lower()
@@ -109,7 +113,7 @@ def normalize_ar(text: str) -> str:
 
 def extract_pdf_text(file_bytes: bytes) -> str:
     reader = PdfReader(io.BytesIO(file_bytes))
-    pages = []
+    pages=[]
     for p in reader.pages:
         try: pages.append(p.extract_text() or "")
         except Exception: pages.append("")
@@ -130,37 +134,37 @@ def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req):
     nat_ok, nat_score     = fuzzy_match(nat_req,  norm_text, THRESH)
     major_ok, major_score = fuzzy_match(major_req, norm_text, THRESH)
 
-    syn_hits = []
+    syn_hits=[]
     if major_syn.strip():
         for s in major_syn.split(","):
-            term = s.strip()
+            term=s.strip()
             if not term: continue
             ok, score = fuzzy_match(term, norm_text, THRESH)
             if ok:
-                major_ok = True
-                major_score = max(major_score, score)
+                major_ok=True; major_score=max(major_score, score)
                 syn_hits.append(f"{term} (score={score})")
 
     if all(kw in norm_text for kw in ["نظم","معلومات"]):
-        major_ok = True
-        major_score = max(major_score, 90)
+        major_ok=True; major_score=max(major_score, 90)
         syn_hits.append("نظم + معلومات (مطابقة مركّبة)")
 
-    req_flags = [x for x in [uni_ok, major_ok, nat_ok] if x is not None]
-    all_ok = (len(req_flags) > 0) and all(req_flags)
-    verdict = "مطابق للشروط ✅" if all_ok else "غير مطابق ❌"
-    detail = {
-        "الجامعة": "✅" if uni_ok else "❌",
-        "التخصص": "✅" if major_ok else "❌",
-        "الجنسية": "✅" if nat_ok else "❌",
-        "درجة الجامعة": uni_score,
-        "درجة التخصص": major_score,
-        "درجة الجنسية": nat_score,
-        "مطابقات التخصص": ", ".join(syn_hits) if syn_hits else ""
+    req_flags=[x for x in [uni_ok, major_ok, nat_ok] if x is not None]
+    all_ok=(len(req_flags)>0) and all(req_flags)
+    verdict="مطابق للشروط ✅" if all_ok else "غير مطابق ❌"
+    detail={
+        "الجامعة":"✅" if uni_ok else "❌",
+        "التخصص":"✅" if major_ok else "❌",
+        "الجنسية":"✅" if nat_ok else "❌",
+        "درجة الجامعة":uni_score,
+        "درجة التخصص":major_score,
+        "درجة الجنسية":nat_score,
+        "مطابقات التخصص":", ".join(syn_hits) if syn_hits else ""
     }
     return verdict, detail
 
-# =============== بطاقة المتطلبات بالنص ===============
+# =========================
+# بطاقة المتطلبات (بالنص)
+# =========================
 st.markdown('<div class="center-card">', unsafe_allow_html=True)
 st.markdown("### إعداد المتطلبات", unsafe_allow_html=True)
 uni_req   = st.text_input("الجامعة المطلوبة", "جامعة الملك سعود")
@@ -169,9 +173,13 @@ major_syn = st.text_input("مرادفات التخصص (اختياري)", "إد�
 nat_req   = st.text_input("الجنسية المطلوبة", "سعودي")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# =============== خانات الرفع على اليسار (مثل الصورة: عمود رأسي) ===============
-left = st.container()
-with left:
+# =========================
+# بطاقات الرفع بالعرض (ثلاثة أعمدة جنب بعض)
+# =========================
+col_pdf, col_xlsx, col_csv = st.columns(3, gap="large")
+results=[]
+
+with col_pdf:
     st.markdown('<div class="upl-card">', unsafe_allow_html=True)
     st.markdown("### رفع CVات PDF", unsafe_allow_html=True)
     pdf_files = st.file_uploader("ملفات PDF", type=["pdf"], accept_multiple_files=True, key="pdf_up")
@@ -179,61 +187,54 @@ with left:
         if not pdf_files:
             st.warning("فضلاً ارفعي ملفًا واحدًا على الأقل.")
         else:
-            results = []
             for f in pdf_files:
                 raw = extract_pdf_text(f.read())
                 verdict, detail = evaluate_cv(raw, uni_req, major_req, major_syn, nat_req)
-                box = "result-ok" if "✅" in verdict else "result-bad"
+                box="result-ok" if "✅" in verdict else "result-bad"
                 st.markdown(f'<div class="{box}"><b>{f.name}</b> — {verdict}</div>', unsafe_allow_html=True)
                 results.append({"اسم الملف": f.name, "النتيجة": verdict, **detail})
-            if results:
-                st.divider()
-                df_out = pd.DataFrame(results)
-                st.dataframe(df_out, use_container_width=True)
-                csv = df_out.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("تحميل النتائج CSV", csv, "نتائج_الفرز.csv", "text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="upl-card" style="margin-top:14px;">', unsafe_allow_html=True)
+with col_xlsx:
+    st.markdown('<div class="upl-card">', unsafe_allow_html=True)
     st.markdown("### رفع ملف Excel", unsafe_allow_html=True)
     excel_file = st.file_uploader("ملف Excel", type=["xlsx"], accept_multiple_files=False, key="xls_up")
     if st.button("تحقّق من Excel", type="primary", key="xls_btn"):
         if not excel_file:
             st.warning("فضلاً ارفعي ملف Excel.")
         else:
-            df = pd.read_excel(excel_file); results=[]
+            df = pd.read_excel(excel_file)
             for idx, row in df.iterrows():
                 text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
                 verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req)
-                box = "result-ok" if "✅" in verdict else "result-bad"
+                box="result-ok" if "✅" in verdict else "result-bad"
                 st.markdown(f'<div class="{box}"><b>صف {idx+1}</b> — {verdict}</div>', unsafe_allow_html=True)
                 results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
-            if results:
-                st.divider()
-                df_out = pd.DataFrame(results)
-                st.dataframe(df_out, use_container_width=True)
-                csv = df_out.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("تحميل النتائج CSV", csv, "نتائج_الفرز.csv", "text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="upl-card" style="margin-top:14px;">', unsafe_allow_html=True)
+with col_csv:
+    st.markdown('<div class="upl-card">', unsafe_allow_html=True)
     st.markdown("### رفع ملف CSV", unsafe_allow_html=True)
     csv_file = st.file_uploader("ملف CSV", type=["csv"], accept_multiple_files=False, key="csv_up")
     if st.button("تحقّق من CSV", type="primary", key="csv_btn"):
         if not csv_file:
             st.warning("فضلاً ارفعي ملف CSV.")
         else:
-            df = pd.read_csv(csv_file); results=[]
+            df = pd.read_csv(csv_file)
             for idx, row in df.iterrows():
                 text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
                 verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req)
-                box = "result-ok" if "✅" in verdict else "result-bad"
+                box="result-ok" if "✅" in verdict else "result-bad"
                 st.markdown(f'<div class="{box}"><b>صف {idx+1}</b> — {verdict}</div>', unsafe_allow_html=True)
                 results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
-            if results:
-                st.divider()
-                df_out = pd.DataFrame(results)
-                st.dataframe(df_out, use_container_width=True)
-                csv = df_out.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("تحميل النتائج CSV", csv, "نتائج_الفرز.csv", "text/csv")
     st.markdown('</div>', unsafe_allow_html=True)
+
+# =========================
+# النتائج والتنزيل
+# =========================
+if results:
+    st.divider()
+    df_out = pd.DataFrame(results)
+    st.dataframe(df_out, use_container_width=True)
+    csv = df_out.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("تحميل النتائج CSV", csv, "نتائج_الفرز.csv", "text/csv")
