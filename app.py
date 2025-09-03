@@ -5,9 +5,9 @@ from rapidfuzz import fuzz
 import pandas as pd
 
 # ===== إعداد الصفحة =====
-st.set_page_config(page_title="فلترة السير الذاتية", page_icon="🗂️", layout="centered")
+st.set_page_config(page_title="فلترة السير الذاتية", page_icon="🗂️", layout="wide")
 st.title("🗂️ فلترة السير الذاتية")
-st.caption("Version: 2.3 • 3 خانات أساسية + مرادفات للتخصص • رفع متعدد • تصدير CSV")
+st.caption("Version: 3.0 • يدعم PDF + Excel + CSV • رفع متعدد • تصدير النتائج")
 
 # ===== أدوات مساعدة =====
 def normalize_ar(text: str) -> str:
@@ -32,7 +32,6 @@ def extract_pdf_text(file_bytes: bytes) -> str:
     return "\n".join(pages)
 
 def fuzzy_match(term: str, text: str, threshold: int = 80) -> (bool, int):
-    """مطابقة ذكية (Fuzzy) بين المصطلح والنص"""
     if not term or not term.strip():
         return None, 0
     norm_text = normalize_ar(text)
@@ -42,36 +41,18 @@ def fuzzy_match(term: str, text: str, threshold: int = 80) -> (bool, int):
     score = max(score1, score2)
     return (score >= threshold), int(score)
 
-# ===== واجهة إدخال المتطلبات =====
-st.subheader("✨ حددي المتطلبات")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    uni_req = st.text_input("🏫 الجامعة المطلوبة", placeholder="مثال: جامعة الملك سعود / KSU")
-with col2:
-    major_req = st.text_input("📚 التخصص المطلوب", placeholder="مثال: نظم المعلومات الإدارية / MIS")
-    major_syn = st.text_input("مرادفات التخصص (اختياري)", placeholder="إدارة نظم معلومات, MIS, Management Information Systems")
-with col3:
-    nat_req = st.text_input("🌍 الجنسية المطلوبة", placeholder="مثال: سعودي / سعودية / Saudi")
-
-st.divider()
-
-# ===== رفع الملفات =====
-st.subheader("📂 ارفعي ملفات الـ CV دفعة واحدة")
-files = st.file_uploader("ملفات PDF", type=["pdf"], accept_multiple_files=True)
-
 # ===== التحقق =====
-def evaluate_cv(text_raw: str, threshold: int = 80):
+def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req, threshold: int = 80):
     norm_text = normalize_ar(text_raw)
 
-    # الجامعة والجنسية: Fuzzy عادي
+    # الجامعة والجنسية: Fuzzy
     uni_ok, uni_score = fuzzy_match(uni_req, norm_text, threshold)
     nat_ok, nat_score = fuzzy_match(nat_req, norm_text, threshold)
 
-    # التخصص: Fuzzy + شرط مركّب للكلمات الأساسية (نظم + معلومات)
+    # التخصص: Fuzzy + مرادفات + كلمات أساسية
     major_ok, major_score = fuzzy_match(major_req, norm_text, threshold)
-
     syn_hits = []
+
     if major_syn.strip():
         for s in major_syn.split(","):
             term = s.strip()
@@ -82,7 +63,7 @@ def evaluate_cv(text_raw: str, threshold: int = 80):
                 major_ok = True
                 major_score = max(major_score, score)
                 syn_hits.append(f"{term} (score={score})")
-    # كلمات أساسية عربية للتخصص (تقلل قبول الغلط)
+    # كلمات أساسية
     base_keywords = ["نظم", "معلومات"]
     kw_hits = [kw for kw in base_keywords if kw in norm_text]
     if len(kw_hits) >= 2:
@@ -90,64 +71,83 @@ def evaluate_cv(text_raw: str, threshold: int = 80):
         major_score = max(major_score, 90)
         syn_hits.append(" + ".join(kw_hits) + " (مطابقة مركّبة)")
 
+    # الحكم النهائي
     req_flags = [x for x in [uni_ok, major_ok, nat_ok] if x is not None]
     all_ok = (len(req_flags) > 0) and all(req_flags)
     verdict = "✅ مطابق للشروط" if all_ok else "❌ غير مطابق"
 
-    detail = [
-        ("الجامعة", uni_ok, uni_score, []),
-        ("التخصص", major_ok, major_score, syn_hits),
-        ("الجنسية", nat_ok, nat_score, []),
-    ]
+    detail = {
+        "الجامعة": "✅" if uni_ok else "❌",
+        "التخصص": "✅" if major_ok else "❌",
+        "الجنسية": "✅" if nat_ok else "❌",
+        "درجة الجامعة": uni_score,
+        "درجة التخصص": major_score,
+        "درجة الجنسية": nat_score,
+        "مطابقات التخصص": ", ".join(syn_hits) if syn_hits else ""
+    }
     return verdict, detail
 
-def render_detail(detail):
-    for label, ok, score, hits in detail:
-        if ok is None:
-            st.write(f"**{label}:** ⏭️ لم يتم تحديد شرط")
+# ===== خانات المتطلبات =====
+st.sidebar.header("⚙️ إعداد المتطلبات")
+uni_req = st.sidebar.text_input("🏫 الجامعة المطلوبة", "جامعة الملك سعود")
+major_req = st.sidebar.text_input("📚 التخصص المطلوب", "نظم المعلومات الإدارية")
+major_syn = st.sidebar.text_input("مرادفات التخصص (اختياري)", "إدارة نظم معلومات, MIS, Management Information Systems")
+nat_req = st.sidebar.text_input("🌍 الجنسية المطلوبة", "سعودي")
+threshold = st.sidebar.slider("عتبة المطابقة (Fuzzy)", 70, 95, 80)
+
+# ===== التبويبات =====
+tab1, tab2, tab3 = st.tabs(["📂 رفع CVات PDF", "📊 رفع ملف Excel", "📑 رفع ملف CSV"])
+
+results = []
+
+# === تبويب 1: PDF ===
+with tab1:
+    st.subheader("📂 ارفعي ملفات الـ CV (PDF)")
+    pdf_files = st.file_uploader("ملفات PDF", type=["pdf"], accept_multiple_files=True)
+    if st.button("تحقّق من CVات PDF", type="primary"):
+        if not pdf_files:
+            st.warning("فضلاً ارفعي ملفًا واحدًا على الأقل.")
         else:
-            icon = "✅" if ok else "❌"
-            st.write(f"**{label}:** {icon}  (score={score})")
-            if hits:
-                st.caption("مطابقات: " + ", ".join(hits))
-
-if st.button("تحقّق من الملفات", type="primary"):
-    if not files:
-        st.warning("فضلاً ارفعي ملفًا واحدًا على الأقل.")
-    else:
-        results = []
-        for i, f in enumerate(files, start=1):
-            st.divider()
-            st.write(f"**📄 الملف {i}:** `{f.name}`")
-            try:
+            for f in pdf_files:
                 raw = extract_pdf_text(f.read())
-            except Exception as e:
-                st.error(f"تعذّر قراءة `{f.name}`: {e}")
-                continue
+                verdict, detail = evaluate_cv(raw, uni_req, major_req, major_syn, nat_req, threshold)
+                st.write(f"**📄 {f.name} → {verdict}**")
+                results.append({"اسم الملف": f.name, "النتيجة": verdict, **detail})
 
-            verdict, detail = evaluate_cv(raw)
-            st.markdown(f"**النتيجة:** {verdict}")
-            render_detail(detail)
+# === تبويب 2: Excel ===
+with tab2:
+    st.subheader("📊 ارفعي ملف Excel (xlsx)")
+    excel_file = st.file_uploader("ملف Excel", type=["xlsx"], accept_multiple_files=False)
+    if st.button("تحقّق من Excel", type="primary"):
+        if not excel_file:
+            st.warning("فضلاً ارفعي ملف Excel.")
+        else:
+            df = pd.read_excel(excel_file)
+            for idx, row in df.iterrows():
+                text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
+                verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req, threshold)
+                st.write(f"**📝 صف {idx+1} → {verdict}**")
+                results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
 
-            results.append({
-                "اسم الملف": f.name,
-                "النتيجة": verdict,
-                "الجامعة": "✅" if detail[0][1] else "❌" if detail[0][1] is not None else "—",
-                "التخصص": "✅" if detail[1][1] else "❌" if detail[1][1] is not None else "—",
-                "الجنسية": "✅" if detail[2][1] else "❌" if detail[2][1] is not None else "—",
-                "درجة الجامعة": detail[0][2],
-                "درجة التخصص": detail[1][2],
-                "درجة الجنسية": detail[2][2],
-            })
+# === تبويب 3: CSV ===
+with tab3:
+    st.subheader("📑 ارفعي ملف CSV")
+    csv_file = st.file_uploader("ملف CSV", type=["csv"], accept_multiple_files=False)
+    if st.button("تحقّق من CSV", type="primary"):
+        if not csv_file:
+            st.warning("فضلاً ارفعي ملف CSV.")
+        else:
+            df = pd.read_csv(csv_file)
+            for idx, row in df.iterrows():
+                text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
+                verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req, threshold)
+                st.write(f"**📝 صف {idx+1} → {verdict}**")
+                results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
 
-        if results:
-            df = pd.DataFrame(results)
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="⬇️ تحميل النتائج كـ CSV",
-                data=csv,
-                file_name="نتائج_الفرز.csv",
-                mime="text/csv"
-            )
-
-st.caption("🔎 ملاحظة: ملفات PDF المصوّرة (بدون نص) تحتاج OCR لاحقاً. العتبة الافتراضية 80 ويمكن تشديدها داخل الكود لو حبيتي.")
+# ===== زر تحميل النتائج =====
+if results:
+    df = pd.DataFrame(results)
+    st.divider()
+    st.dataframe(df, use_container_width=True)
+    csv = df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("⬇️ تحميل النتائج كـ CSV", csv, "نتائج_الفرز.csv", "text/csv")
