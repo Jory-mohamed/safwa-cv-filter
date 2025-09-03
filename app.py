@@ -9,32 +9,34 @@ import pandas as pd
 # =========================
 st.set_page_config(page_title="فلترة السير الذاتية", page_icon=None, layout="wide")
 
-# ===== أنماط الواجهة (خلفية هادئة + نص داكن + لوقو زاوية) =====
+# ===== أنماط الواجهة (خلفية هادئة + نص واضح + لوقو زاوية + عنوان مركزي) =====
 st.markdown(
     """
     <style>
     :root{
       --bg-soft:#f8fafc;       /* أبيض هادئ */
       --text:#0f172a;          /* نص داكن */
-      --muted:#334155;         /* نص ثانوي */
+      --muted:#475569;         /* نص ثانوي */
       --navy:#0b2447;          /* نيڤي */
       --ok-bg:#e8f5e9; --ok-br:#2e7d32;
       --bad-bg:#ffebee; --bad-br:#c62828;
     }
-    /* خلفية هادئة بدلاً من أبيض فاقع */
-    .stApp, .block-container, body { background: var(--bg-soft) !important; }
 
-    /* ألوان النصوص عامة */
+    /* توحيد الخلفية وإلغاء أي تناقض في الثيم */
+    html, body, .stApp, .block-container { background: var(--bg-soft) !important; }
+
+    /* ألوان النصوص العامة */
     h1,h2,h3,h4,h5,h6,p,div,span,label,li { color: var(--text) !important; }
-    .stCaption, .stMarkdown small, .st-emotion-cache-1y4p8pa { color: var(--muted) !important; }
+    .small, .caption, .st-emotion-cache-1y4p8pa { color: var(--muted) !important; }
 
-    /* عنوان الصفحة رسمي */
-    .page-title { font-size: 34px; font-weight: 800; color: var(--navy); margin: 8px 0 2px 0; }
-    .page-sub { font-size: 14px; color: var(--muted); margin-bottom: 16px; }
+    /* اللوقو في الزاوية العليا اليمنى */
+    .corner { position: fixed; top: 16px; right: 16px; z-index: 1000; opacity:.98; pointer-events:none; }
+    .corner img { width: 80px; height:auto; display:block; }
 
-    /* لوقو صغير في الزاوية العليا اليمنى */
-    .corner { position: fixed; top: 16px; right: 16px; z-index: 1000; opacity:.98; }
-    .corner img { width: 80px; height:auto; }
+    /* عنوان مركزي */
+    .title-wrap { text-align:center; margin-top: 18px; }
+    .title { font-size: 34px; font-weight: 800; color: var(--navy); margin: 8px 0 4px 0; }
+    .subtitle { font-size: 15px; color: var(--muted); margin-bottom: 18px; }
 
     /* صناديق النتائج */
     .result-ok  {background:var(--ok-bg);  border-left:6px solid var(--ok-br);  padding:12px 14px; border-radius:10px; margin:10px 0;}
@@ -49,18 +51,19 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ===== اللوقو في الزاوية (إن وجد) =====
+# ===== اللوقو في الزاوية (إن وجد) باستخدام st.image لضمان الظهور) =====
 def show_corner_logo():
     for path in ("logo.png", "assets/logo.png", "static/logo.png"):
         if os.path.exists(path):
-            st.markdown(f'<div class="corner"><img src="{path}"/></div>', unsafe_allow_html=True)
+            st.markdown('<div class="corner">', unsafe_allow_html=True)
+            st.image(path, use_column_width=False)
+            st.markdown('</div>', unsafe_allow_html=True)
             break
 show_corner_logo()
 
-# ===== عنوان رسمي بدون إيموجي =====
-st.markdown('<div class="page-title">فلترة السير الذاتية الذكية</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-sub">منصة بسيطة لفرز السير الذاتية وفق الجامعة والتخصص والجنسية، مع دعم PDF وExcel وCSV.</div>', unsafe_allow_html=True)
-st.caption("Version: 3.3 • نمط رسمي • خلفية هادئة • لوقو زاوية • عتبة ثابتة 80")
+# ===== عنوان مركزي + وصف مختصر بدون إيموجي =====
+st.markdown('<div class="title-wrap"><div class="title">فلترة السير الذاتية الذكية</div><div class="subtitle">منصّة لفرز السير الذاتية</div></div>', unsafe_allow_html=True)
+st.caption("Version: 3.4")
 
 # =========================
 # أدوات مساعدة
@@ -92,10 +95,10 @@ def fuzzy_match(term: str, text: str, threshold: int = 80) -> (bool, int):
     return (score >= threshold), int(score)
 
 def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req):
-    THRESH = 80
+    THRESH = 80  # عتبة ثابتة
     norm_text = normalize_ar(text_raw)
-    uni_ok, uni_score = fuzzy_match(uni_req,  norm_text, THRESH)
-    nat_ok, nat_score = fuzzy_match(nat_req,  norm_text, THRESH)
+    uni_ok, uni_score   = fuzzy_match(uni_req,  norm_text, THRESH)
+    nat_ok, nat_score   = fuzzy_match(nat_req,  norm_text, THRESH)
     major_ok, major_score = fuzzy_match(major_req, norm_text, THRESH)
 
     syn_hits = []
@@ -123,7 +126,9 @@ def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req):
         "الجامعة": "✅" if uni_ok else "❌",
         "التخصص": "✅" if major_ok else "❌",
         "الجنسية": "✅" if nat_ok else "❌",
-        "درجة الجامعة": uni_score, "درجة التخصص": major_score, "درجة الجنسية": nat_score,
+        "درجة الجامعة": uni_score,
+        "درجة التخصص": major_score,
+        "درجة الجنسية": nat_score,
         "مطابقات التخصص": ", ".join(syn_hits) if syn_hits else ""
     }
     return verdict, detail
