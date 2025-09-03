@@ -1,5 +1,5 @@
 import streamlit as st
-import re, unicodedata, io
+import re, unicodedata, io, os
 from pypdf import PdfReader
 from rapidfuzz import fuzz
 import pandas as pd
@@ -7,7 +7,18 @@ import pandas as pd
 # ===== إعداد الصفحة =====
 st.set_page_config(page_title="فلترة السير الذاتية", page_icon="🗂️", layout="wide")
 st.title("🗂️ فلترة السير الذاتية")
-st.caption("Version: 3.1 • يدعم PDF + Excel + CSV • عتبة ثابتة 80 • تصدير النتائج")
+st.caption("Version: 3.1.1 • يدعم PDF + Excel + CSV • عتبة ثابتة 80 • تصدير النتائج • دعم اللوقو")
+
+# ===== عرض اللوقو إن وُجد =====
+def show_logo():
+    for path in ("logo.png", "assets/logo.png", "static/logo.png"):
+        if os.path.exists(path):
+            try:
+                st.image(path, width=140)
+            except Exception:
+                pass
+            break
+show_logo()
 
 # ===== أدوات مساعدة =====
 def normalize_ar(text: str) -> str:
@@ -17,7 +28,7 @@ def normalize_ar(text: str) -> str:
     text = ''.join(ch for ch in unicodedata.normalize('NFKD', text) if not unicodedata.combining(ch))
     text = re.sub(r"[أإآٱ]", "ا", text)
     text = text.replace("ة","ه").replace("ى","ي")
-    text = re.sub(r"[^0-9a-z؀-ۿ\s]+", " ", text)
+    text = re.sub(r"[^0-9a-z\u0600-\u06FF\s]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -63,6 +74,7 @@ def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req, threshold
                 major_ok = True
                 major_score = max(major_score, score)
                 syn_hits.append(f"{term} (score={score})")
+
     # كلمات أساسية
     base_keywords = ["نظم", "معلومات"]
     kw_hits = [kw for kw in base_keywords if kw in norm_text]
