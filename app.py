@@ -7,7 +7,7 @@ import pandas as pd
 # ===== إعداد الصفحة =====
 st.set_page_config(page_title="فلترة السير الذاتية", page_icon="🗂️", layout="wide")
 st.title("🗂️ فلترة السير الذاتية")
-st.caption("Version: 3.0 • يدعم PDF + Excel + CSV • رفع متعدد • تصدير النتائج")
+st.caption("Version: 3.1 • يدعم PDF + Excel + CSV • عتبة ثابتة 80 • تصدير النتائج")
 
 # ===== أدوات مساعدة =====
 def normalize_ar(text: str) -> str:
@@ -93,7 +93,6 @@ uni_req = st.sidebar.text_input("🏫 الجامعة المطلوبة", "جام�
 major_req = st.sidebar.text_input("📚 التخصص المطلوب", "نظم المعلومات الإدارية")
 major_syn = st.sidebar.text_input("مرادفات التخصص (اختياري)", "إدارة نظم معلومات, MIS, Management Information Systems")
 nat_req = st.sidebar.text_input("🌍 الجنسية المطلوبة", "سعودي")
-threshold = st.sidebar.slider("عتبة المطابقة (Fuzzy)", 70, 95, 80)
 
 # ===== التبويبات =====
 tab1, tab2, tab3 = st.tabs(["📂 رفع CVات PDF", "📊 رفع ملف Excel", "📑 رفع ملف CSV"])
@@ -110,7 +109,7 @@ with tab1:
         else:
             for f in pdf_files:
                 raw = extract_pdf_text(f.read())
-                verdict, detail = evaluate_cv(raw, uni_req, major_req, major_syn, nat_req, threshold)
+                verdict, detail = evaluate_cv(raw, uni_req, major_req, major_syn, nat_req)
                 st.write(f"**📄 {f.name} → {verdict}**")
                 results.append({"اسم الملف": f.name, "النتيجة": verdict, **detail})
 
@@ -125,7 +124,7 @@ with tab2:
             df = pd.read_excel(excel_file)
             for idx, row in df.iterrows():
                 text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
-                verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req, threshold)
+                verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req)
                 st.write(f"**📝 صف {idx+1} → {verdict}**")
                 results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
 
@@ -140,7 +139,7 @@ with tab3:
             df = pd.read_csv(csv_file)
             for idx, row in df.iterrows():
                 text_raw = " ".join([str(v) for v in row.values if pd.notnull(v)])
-                verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req, threshold)
+                verdict, detail = evaluate_cv(text_raw, uni_req, major_req, major_syn, nat_req)
                 st.write(f"**📝 صف {idx+1} → {verdict}**")
                 results.append({"اسم الملف": f"صف {idx+1}", "النتيجة": verdict, **detail})
 
