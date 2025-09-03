@@ -10,67 +10,64 @@ import pandas as pd
 st.set_page_config(page_title="فلترة السير الذاتية", page_icon=None, layout="wide")
 
 # =========================
-# ثيم مطابق للصورة (Navy + أبيض + أخضر)
+# ثيم مطابق للصورة (أبيض + نيڤي + أخضر) + لوقو زاوية يمين
 # =========================
 st.markdown("""
 <style>
 :root{
-  --navy:#0b2447;       /* الخلفية الرئيسية */
-  --navy-2:#081b36;     /* درجة أغمق للسايدبار/العناصر */
-  --white:#ffffff;      /* كل النصوص */
-  --muted:#d1d5db;      /* وصف */
-  --green:#16a34a;      /* أزرار */
-  --green-dark:#0f8a3d; /* تحويم */
-  --ok-bg:rgba(22,163,74,.12);
-  --ok-br:#22c55e;
-  --bad-bg:rgba(239,68,68,.12);
-  --bad-br:#ef4444;
+  --bg:#ffffff;          /* خلفية بيضاء */
+  --navy:#0b2447;        /* نيڤي للعناوين والنصوص */
+  --muted:#475569;       /* وصف خفيف */
+  --line:#e2e8f0;        /* حدود خفيفة */
+  --green:#16a34a;       /* زر أخضر */
+  --green-d:#0f8a3d;     /* hover */
+  --ok-bg:#e8f5e9; --ok-br:#2e7d32;
+  --bad-bg:#ffebee; --bad-br:#c62828;
 }
 
-/* خلفية كاملة Navy */
-html, body, .stApp, .block-container { background: var(--navy) !important; }
+/* خلفية بيضاء موحّدة */
+html, body, .stApp, .block-container { background: var(--bg) !important; }
 
-/* شريط جانبي Navy أغمق */
-section[data-testid="stSidebar"] { background: var(--navy-2) !important; }
+/* كل النصوص نيڤي */
+h1,h2,h3,h4,h5,h6,p,div,span,label,li,small,code,em,strong { color: var(--navy) !important; }
 
-/* كل النصوص أبيض */
-h1,h2,h3,h4,h5,h6,p,div,span,label,li,small,code,em,strong { color: var(--white) !important; }
+/* عنوان مركزي مثل الصورة */
+.title-wrap{ text-align:center; margin-top: 8px; }
+.title{ font-size: 36px; font-weight: 800; color: var(--navy); margin: 8px 0 2px 0; }
+.subtitle{ font-size: 16px; color: var(--navy); font-weight:600; }
+.subsubtitle{ font-size: 13px; color: var(--muted); margin-top: 2px; }
 
-/* العنوان المركزي */
-.title-wrap{ text-align:center; margin-top: 10px; }
-.title{ font-size: 34px; font-weight: 800; color: var(--white); margin: 6px 0 4px 0; }
-.subtitle{ font-size: 14px; color: var(--muted); }
+/* اللوقو صغير بالزاوية العليا يمين (مثل الوزارات) */
+.corner{ position: fixed; top: 14px; right: 16px; z-index: 1000; opacity:.98; pointer-events:none; }
+.corner img{ width: 52px; height:auto; display:block; }  /* غيّري 52 لو تبينه أصغر/أكبر */
 
-/* اللوقو صغير بالزاوية العليا اليمنى */
-.corner{ position: fixed; top: 14px; right: 16px; z-index: 1000; opacity:.96; pointer-events:none; }
-.corner img{ width: 64px; height:auto; display:block; }
-
-/* تبويبات بخط أبيض وحد سفلي أخضر عند التفعيل */
+/* تبويبات بخط نيڤي وخط سفلي أخضر عند التفعيل */
 button[role="tab"]{ color: var(--muted) !important; background: transparent !important; border: 0 !important; }
-button[role="tab"][aria-selected="true"]{ color: var(--white) !important; border-bottom: 3px solid var(--green) !important; }
+button[role="tab"][aria-selected="true"]{ color: var(--navy) !important; border-bottom: 3px solid var(--green) !important; }
 
-/* حقول الإدخال داكنة وحدود فاتحة ونص أبيض */
+/* مدخلات خفيفة وحدود رقيقة */
 input, textarea, .stTextInput input, .stTextArea textarea{
-  color: var(--white) !important; background: rgba(255,255,255,0.06) !important;
-  border: 1px solid rgba(255,255,255,0.25) !important; border-radius: 10px !important;
+  color: var(--navy) !important; background: #f8fafc !important;
+  border: 1px solid var(--line) !important; border-radius: 10px !important;
 }
-div[data-baseweb="select"] > div{ background: rgba(255,255,255,0.06) !important; color: var(--white) !important; border-radius: 10px !important; }
+div[data-baseweb="select"] > div{ background: #f8fafc !important; color: var(--navy) !important; border-radius: 10px !important; }
 
 /* رافع الملفات */
-[data-testid="stFileUploader"] div{ color: var(--white) !important; }
-[data-testid="stFileUploader"] section{ background: rgba(255,255,255,0.06) !important; border: 1px dashed rgba(255,255,255,0.25) !important; border-radius: 12px !important; }
-
-/* الأزرار أخضر */
-button[kind="primary"], .stDownloadButton>button{
-  background: var(--green) !important; color: var(--white) !important; border: 0 !important; border-radius: 10px !important;
+[data-testid="stFileUploader"] section{
+  background: #f8fafc !important; border: 1px dashed var(--line) !important; border-radius: 12px !important;
 }
-button[kind="primary"]:hover, .stDownloadButton>button:hover{ background: var(--green-dark) !important; }
+
+/* الأزرار خضراء */
+button[kind="primary"], .stDownloadButton>button{
+  background: var(--green) !important; color: #ffffff !important; border: 0 !important; border-radius: 10px !important;
+}
+button[kind="primary"]:hover, .stDownloadButton>button:hover{ background: var(--green-d) !important; }
 
 /* صناديق النتائج */
 .result-ok{ background: var(--ok-bg); border-left: 6px solid var(--ok-br); padding:12px 14px; border-radius:10px; margin:10px 0; }
 .result-bad{ background: var(--bad-bg); border-left: 6px solid var(--bad-br); padding:12px 14px; border-radius:10px; margin:10px 0; }
 
-/* جدول النتائج أبيض بنص داكن لسهولة القراءة */
+/* جدول النتائج: إطار خفيف ونص داكن للمقروئية */
 [data-testid="stTable"], .stDataFrame, .stDataFrame div{ color: #111827 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -80,15 +77,20 @@ def show_corner_logo():
     for path in ("logo.png", "assets/logo.png", "static/logo.png"):
         if os.path.exists(path):
             st.markdown('<div class="corner">', unsafe_allow_html=True)
-            # use_container_width لتفادي تحذير use_column_width
-            st.image(path, use_container_width=False)
+            st.image(path, use_container_width=False)  # width يتحكم به CSS أعلاه
             st.markdown('</div>', unsafe_allow_html=True)
             break
 show_corner_logo()
 
-# ===== عنوان في المنتصف ووصف مختصر =====
-st.markdown('<div class="title-wrap"><div class="title">فلترة السير الذاتية الذكية</div><div class="subtitle">منصّة لفرز السير الذاتية</div></div>', unsafe_allow_html=True)
-st.caption("Version: 3.5")
+# ===== العنوان بالنص + السطرين المحددين =====
+st.markdown(
+    '<div class="title-wrap">'
+    '<div class="title">فلترة السير الذاتية الذكية</div>'
+    '<div class="subtitle">منصّة لفرز السير الذاتية</div>'
+    '<div class="subsubtitle">صفوة — فلتر للسير الذاتية الذكي</div>'
+    '</div>', unsafe_allow_html=True
+)
+st.caption("Version: 3.6")
 
 # =========================
 # أدوات مساعدة
@@ -122,8 +124,8 @@ def fuzzy_match(term: str, text: str, threshold: int = 80) -> (bool, int):
 def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req):
     THRESH = 80
     norm_text = normalize_ar(text_raw)
-    uni_ok, uni_score   = fuzzy_match(uni_req,  norm_text, THRESH)
-    nat_ok, nat_score   = fuzzy_match(nat_req,  norm_text, THRESH)
+    uni_ok, uni_score     = fuzzy_match(uni_req,  norm_text, THRESH)
+    nat_ok, nat_score     = fuzzy_match(nat_req,  norm_text, THRESH)
     major_ok, major_score = fuzzy_match(major_req, norm_text, THRESH)
 
     syn_hits = []
@@ -137,8 +139,8 @@ def evaluate_cv(text_raw: str, uni_req, major_req, major_syn, nat_req):
                 major_score = max(major_score, score)
                 syn_hits.append(f"{term} (score={score})")
 
-    base_keywords = ["نظم","معلومات"]
-    if all(kw in norm_text for kw in base_keywords):
+    # مطابقة مركّبة بسيطة للتخصص
+    if all(kw in norm_text for kw in ["نظم","معلومات"]):
         major_ok = True
         major_score = max(major_score, 90)
         syn_hits.append("نظم + معلومات (مطابقة مركّبة)")
@@ -167,7 +169,7 @@ major_syn = st.sidebar.text_input("مرادفات التخصص (اختياري)"
 nat_req   = st.sidebar.text_input("الجنسية المطلوبة", "سعودي")
 
 # =========================
-# التبويبات
+# التبويبات والوظائف
 # =========================
 tab1, tab2, tab3 = st.tabs(["رفع CVات PDF", "رفع ملف Excel", "رفع ملف CSV"])
 results = []
@@ -220,6 +222,6 @@ with tab3:
 if results:
     df = pd.DataFrame(results)
     st.divider()
-    st.dataframe(df, use_container_width=True)  # جدول أبيض بنص داكن للمقروئية
+    st.dataframe(df, use_container_width=True)
     csv = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button("تحميل النتائج CSV", csv, "نتائج_الفرز.csv", "text/csv")
