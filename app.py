@@ -2,20 +2,22 @@
 import streamlit as st
 from io import BytesIO
 from pathlib import Path
+import tempfile
+import os
 
 from PyPDF2 import PdfReader
 import docx2txt
 from rapidfuzz import fuzz
 
-# ========= إعدادات عامة =========
-THRESH = 80  # نسبة التطابق المطلوبة (غيّريها لو حبيتي)
+# ====== إعدادات ثابتة (ثبّتنا العتبة على 80 ومخفّين التحكم) ======
+THRESH = 80  # لا تغيّري من واجهة المستخدم — ثابت
 st.set_page_config(page_title="صفوة لفرز السير الذاتية", layout="centered")
 st.title("صفوة لفرز السير الذاتية")
 
-# ========= دوال مساعدة =========
+# ====== دوال مساعدة ======
 AR_DIACS = "".join([
     "\u064B","\u064C","\u064D","\u064E","\u064F","\u0650","\u0651","\u0652",
-    "\u0653","\u0654","\u0655","\u0670","\u0640"  # التشكيل + التطويل
+    "\u0653","\u0654","\u0655","\u0670","\u0640"
 ])
 
 def normalize_ar(s: str) -> str:
@@ -25,97 +27,82 @@ def normalize_ar(s: str) -> str:
     s = "".join(ch for ch in s if ch not in AR_DIACS)
     return s.lower().strip()
 
-def read_pdf(file) -> str:
+def read_pdf_file(file_bytes: bytes) -> str:
     try:
-        reader = PdfReader(file)
+        reader = PdfReader(BytesIO(file_bytes))
         pages = []
         for p in reader.pages:
-            try:
-                pages.append(p.extract_text() or "")
-            except Exception:
-                pages.append("")
+            pages.append(p.extract_text() or "")
         return "\n".join(pages)
-    except Exception:
-        try:
-            data = file.read()
-            file.seek(0)
-            reader = PdfReader(BytesIO(data))
-            return "\n".join([(p.extract_text() or "") for p in reader.pages])
-        except Exception:
-            return ""
-
-def read_docx(file) -> str:
-    # ملاحظة: docx2txt يفضّل مسار ملف؛ أحياناً يرجّع نص فارغ على السحابة.
-    # نجربه مباشرة، وإذا فشل نرجّع نصًا فارغًا.
-    try:
-        return docx2txt.process(file) or ""
     except Exception:
         return ""
 
-def read_txt(file) -> str:
+def read_docx_file_bytes(file_bytes: bytes) -> str:
     try:
-        return file.read().decode("utf-8", errors="ignore")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+        text = docx2txt.process(tmp_path) or ""
+    except Exception:
+        text = ""
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+    return text
+
+def read_txt_bytes(file_bytes: bytes) -> str:
+    try:
+        return file_bytes.decode("utf-8", errors="ignore")
     except Exception:
         try:
-            return file.read().decode("cp1256", errors="ignore")
+            return file_bytes.decode("cp1256", errors="ignore")
         except Exception:
             return ""
 
-def read_file_text(up):
+def read_uploaded_file(up):
     name = (up.name or "").lower()
+    data = up.read()
+    up.seek(0)
     if name.endswith(".pdf"):
-        return read_pdf(up)
+        return read_pdf_file(data)
     if name.endswith(".docx"):
-        return read_docx(up)
+        return read_docx_file_bytes(data)
     if name.endswith(".txt"):
-        return read_txt(up)
+        return read_txt_bytes(data)
     return ""
 
-def parse_keywords(s: str):
-    if not s: return []
-    parts = [p.strip() for p in s.replace("|",",").replace("/",",").split(",")]
-    return [p for p in parts if p]
-
-# fuzzy helper: نتحقق أولاً من وجود تطابق حرفي، وإلا نستخدم partial_ratio
 def fuzzy_contains(text_norm: str, query_norm: str, thresh: int = THRESH) -> bool:
     if not query_norm:
         return True
     if query_norm in text_norm:
         return True
-    # rapidfuzz.partial_ratio سريع ومناسب للجمل القصيرة ضد نص طويل
     score = fuzz.partial_ratio(text_norm, query_norm)
     return score >= thresh
 
+# خريطة مرادفات بسيطة للجنسية (نقدر نضيف بعدها)
 NATION_SYNONYMS = {
-    "saudi": {
-        "سعودي","سعوديه","سعودية","سعود","مواطن سعودي",
-        "ksa","saudi","saudi arabia","sa"
-    },
-    "non": {
-        "غير سعودي","غير سعوديه","غير-سعودي","غيرسعودي",
-        "non saudi","non-saudi","foreigner","expat"
-    }
+    "saudi": ["سعودي", "سعوديه", "سعودية", "ksa", "saudi"],
+    "non": ["غير سعودي", "non saudi", "foreigner", "expat"]
 }
 
-def match_nation(text_norm: str, want_raw: str, thresh: int = THRESH) -> bool:
+def match_nation(text_norm: str, want_raw: str) -> bool:
     if not want_raw.strip():
         return True
-    want = normalize_ar(want_raw)
-    # تحديد المجموعة
-    if "سعود" in want or "ksa" in want or "saudi" in want:
-        group = "saudi"
-    elif "غير" in want or "non" in want:
+    w = normalize_ar(want_raw)
+    if "غير" in w or "non" in w:
         group = "non"
+    elif "سعود" in w or "ksa" in w or "saudi" in w:
+        group = "saudi"
     else:
-        # كلمة حرّة: نستخدم fuzzy
-        return fuzzy_contains(text_norm, want, thresh)
-    # مرادفات
-    for cand in NATION_SYNONYMS[group]:
-        if fuzzy_contains(text_norm, normalize_ar(cand), thresh):
+        return fuzzy_contains(text_norm, w, THRESH)
+    for cand in NATION_SYNONYMS.get(group, []):
+        if fuzzy_contains(text_norm, normalize_ar(cand), THRESH):
             return True
     return False
 
-# ========= واجهة الإدخال =========
+# ====== واجهة المستخدم ======
 col1, col2 = st.columns(2)
 with col1:
     uni = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
@@ -126,35 +113,32 @@ nation = st.text_input("الجنسية", placeholder="مثال: سعودي / Non
 extra  = st.text_input("كلمات إضافية (اختياري)", placeholder="مثال: خبرة، تدريب صيفي")
 
 uploads = st.file_uploader(
-    "ارفاق ملفات CV (PDF / DOCX / TXT)",
+    "ارفاق ملفات CV (PDF / DOCX / TXT) — اسحب أكثر من ملف معًا",
     type=["pdf","docx","txt"],
     accept_multiple_files=True
 )
 
-# اختيار العتبة من الواجهة (اختياري)
-THRESH = st.slider("نسبة المطابقة (Fuzzy)", 60, 100, THRESH, step=1)
-
+# زر التشغيل
 if st.button("ابدأ الفرز الآن"):
     if not uploads:
         st.warning("حمّلي ملف واحد على الأقل.")
     else:
         uni_n   = normalize_ar(uni)
         major_n = normalize_ar(major)
-        extra_keys = [normalize_ar(k) for k in parse_keywords(extra)]
-        nation_raw = nation
+        extra_keys = [normalize_ar(k) for k in (extra or "").replace("|",",").replace("/",",").split(",") if k.strip()]
+        nation_raw = nation or ""
 
         for up in uploads:
-            content = read_file_text(up)
+            content = read_uploaded_file(up)
             content_n = normalize_ar(content)
 
-            # نبني الشروط (الموجود فقط)
             checks = []
             if uni_n:
                 checks.append(fuzzy_contains(content_n, uni_n, THRESH))
             if major_n:
                 checks.append(fuzzy_contains(content_n, major_n, THRESH))
             if nation_raw.strip():
-                checks.append(match_nation(content_n, nation_raw, THRESH))
+                checks.append(match_nation(content_n, nation_raw))
             for k in extra_keys:
                 checks.append(fuzzy_contains(content_n, k, THRESH))
 
