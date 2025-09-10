@@ -9,48 +9,39 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 from rapidfuzz import fuzz
 
-# OCR
-import pytesseract
-from PIL import Image
-import fitz  # PyMuPDF
+# OCR deps (قد تكون غير متوفرة على الاستضافة)
+OCR_AVAILABLE = True
+try:
+    import pytesseract
+    from PIL import Image
+    import fitz  # PyMuPDF
+    # نحاول نقرأ إصدار تيسيراكت لمعرفة التوفر الحقيقي
+    try:
+        _ = pytesseract.get_tesseract_version()
+    except Exception:
+        OCR_AVAILABLE = False
+except Exception:
+    OCR_AVAILABLE = False
 
-# ── إعداد الصفحة ───────────────────────────────────────────────
+# ── تثبيت الصفحة + ستايل قوي (يجبر الأبيض والنص الأسود) ─────────────
 st.set_page_config(page_title="صفوة | فرز السير الذاتية", page_icon="🔎", layout="centered")
-
-# أجبر الخلفية تكون بيضاء دائمًا
 st.markdown("""
 <style>
-body, .stApp {
-    background-color: #FFFFFF !important;
-    color: #111111 !important;
-}
-.block-container {
-    padding-top: 2rem; max-width: 900px;
-}
-h1,h2,h3 { color: #0F1A2E; }
-.stTextInput>div>div>input {
-    background: #FAF3E8 !important;  /* كريمي */
-    color: #111111 !important;
-    border-radius: 12px;
-}
-.stFileUploader>div {
-    background: #FAF3E8 !important;  /* كريمي */
-    border-radius: 12px;
-}
-.stButton>button {
-    background: #0F1A2E;  /* كحلي */
-    color: #FFFFFF;
-    border-radius: 12px;
-    font-weight: 600;
-    height: 44px;
-}
+body, .stApp { background:#FFFFFF !important; color:#111111 !important; }
+.block-container { padding-top: 1.5rem; max-width: 960px; }
+h1,h2,h3 { color:#0F1A2E !important; }
+.stTextInput>div>div>input { background:#FAF3E8 !important; color:#111 !important; border-radius:12px; }
+.stFileUploader>div { background:#FAF3E8 !important; border-radius:12px; }
+.stButton>button { background:#0F1A2E; color:#fff; border-radius:12px; font-weight:600; height:44px; }
+.dataframe td, .dataframe th { text-align:center; }
+.small { color:#6B7280; font-size:12px; }
+.card { background:#FFF; border:1px solid rgba(0,0,0,.06); border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
 </style>
 """, unsafe_allow_html=True)
 
-# ── دوال مساعدة ────────────────────────────────────────────────
+# ── أدوات عربية + Fuzzy ────────────────────────────────────────
 ARABIC_DIACRITICS = re.compile(r'[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]')
-
-def normalize_arabic(s: str) -> str:
+def normalize_ar(s: str) -> str:
     if not s: return ""
     s = s.strip()
     s = ARABIC_DIACRITICS.sub('', s)
@@ -60,17 +51,19 @@ def normalize_arabic(s: str) -> str:
     return s
 
 def fuzzy_score(needle: str, haystack: str) -> int:
+    from rapidfuzz import fuzz
     if not needle or not haystack: return 0
     return fuzz.partial_ratio(needle.lower(), haystack.lower())
 
+# ── قرّاءات الملفات ────────────────────────────────────────────
 def read_txt(file) -> str:
     try:
         data = file.read()
-        for enc in ("utf-8", "windows-1256", "latin-1"):
+        for enc in ("utf-8","windows-1256","latin-1"):
             try: return data.decode(enc, errors="ignore")
-            except Exception: continue
+            except: pass
         return data.decode("utf-8", errors="ignore")
-    except Exception: return ""
+    except: return ""
 
 def read_docx(file) -> str:
     try:
@@ -80,11 +73,11 @@ def read_docx(file) -> str:
                 xml = d.read().decode('utf-8', errors='ignore')
         text = re.sub(r'</w:p>', '\n', xml)
         text = re.sub(r'<[^>]+>', ' ', text)
-        text = re.sub(r'\s+', ' ', text)
-        return text
-    except Exception: return ""
+        return re.sub(r'\s+', ' ', text)
+    except: return ""
 
-def read_pdf_arabic(file) -> str:
+def read_pdf_text(file) -> str:
+    """استخراج نص PDF بمحاولة عربية (بدون OCR)."""
     try:
         data = file.read()
         out = []
@@ -94,146 +87,163 @@ def read_pdf_arabic(file) -> str:
                 t = re.sub(r'\s+', ' ', t)
                 t = get_display(arabic_reshaper.reshape(t))
                 out.append(t)
-        return normalize_arabic("\n".join(out))
-    except Exception:
+        return normalize_ar("\n".join(out))
+    except:
         return ""
 
 def read_pdf_ocr(file) -> str:
-    """OCR احتياطي للـPDF باستخدام Tesseract"""
+    """OCR احتياطي، يعمل فقط لو تيسيراكت متاح."""
+    if not OCR_AVAILABLE:
+        return ""
     try:
         data = file.read()
         doc = fitz.open(stream=data, filetype="pdf")
-        texts = []
+        parts = []
         for page in doc:
-            pix = page.get_pixmap(dpi=200)
+            pix = page.get_pixmap(dpi=220)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             t = pytesseract.image_to_string(img, lang="ara+eng")
-            texts.append(t)
-        return normalize_arabic("\n".join(texts))
-    except Exception:
+            parts.append(t)
+        return normalize_ar("\n".join(parts))
+    except:
         return ""
 
 def read_xlsx(file) -> str:
     try:
         df = pd.read_excel(file).fillna("")
         return " ".join(df.astype(str).values.ravel().tolist())
-    except Exception:
+    except:
         return ""
 
-def get_file_text(sf, use_ocr=False) -> str:
+def safe_text_for(sf, use_ocr: bool) -> tuple[str, str]:
+    """
+    يرجّع (text, source_note)
+    source_note يشرح من وين جاب النص: نص PDF / OCR / DOCX / TXT / اسم ملف فقط
+    """
     name = (sf.name or "").lower()
     sf.seek(0)
     if name.endswith(".txt"):
-        return normalize_arabic(read_txt(sf))
+        return normalize_ar(read_txt(sf)), "TXT"
     if name.endswith(".docx"):
-        sf.seek(0); return normalize_arabic(read_docx(sf))
-    if name.endswith(".pdf"):
-        sf.seek(0)
-        txt = read_pdf_arabic(sf)
-        if (not txt or len(txt) < 30) and use_ocr:
-            sf.seek(0)
-            return read_pdf_ocr(sf)
-        return txt
+        sf.seek(0); return normalize_ar(read_docx(sf)), "DOCX"
     if name.endswith(".xlsx"):
-        sf.seek(0); return normalize_arabic(read_xlsx(sf))
-    return normalize_arabic(name)
+        sf.seek(0); return normalize_ar(read_xlsx(sf)), "XLSX"
+    if name.endswith(".pdf"):
+        sf.seek(0); txt = read_pdf_text(sf)
+        if (not txt or len(txt) < 30) and use_ocr:
+            sf.seek(0); ocr = read_pdf_ocr(sf)
+            if ocr:
+                return ocr, ("PDF + OCR" if OCR_AVAILABLE else "PDF (OCR غير متاح)")
+        if txt:
+            return txt, "PDF (نص)"
+        # فشلنا بالنص و/أو OCR: استخدم اسم الملف عالأقل
+        return normalize_ar(name), "اسم الملف (تعذر قراءة النص)"
+    # امتدادات أخرى: اسم الملف
+    return normalize_ar(name), "اسم الملف"
 
 def file_size_kb(sf) -> int:
     try:
         sf.seek(0, 2); size = sf.tell(); sf.seek(0); return int(size/1024)
-    except Exception: return 0
+    except: return 0
 
-# ── الواجهة ─────────────────────────────────────────────────────
+# ── واجهة ──────────────────────────────────────────────────────
 st.markdown("## صفوة – فرز السير الذاتية 🔎")
-st.caption("املئي الحقول، ارفعي الملفات، واضغطي «فرّز». النتائج تصدر CSV/XLSX/PDF.")
+st.markdown('<div class="small">املئي الحقول، ارفعي الملفات، واضغطي «فرّز». بعدين تقدرين تنزلين CSV / XLSX / PDF.</div>', unsafe_allow_html=True)
 
-with st.form("filter_form", clear_on_submit=False):
-    university = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود / KSU")
-    major      = st.text_input("التخصص", placeholder="مثال: نظم المعلومات الإدارية / MIS")
-    nationality= st.text_input("الجنسية", placeholder="مثال: سعودي/سعودية")
-    uploaded = st.file_uploader(
-        "ارفعي السير الذاتية (PDF / DOCX / TXT / XLSX)",
-        type=["pdf","docx","txt","xlsx"], accept_multiple_files=True
-    )
+# حالة الـ OCR
+if OCR_AVAILABLE:
+    st.success("OCR: جاهز ✅ (Tesseract متوفر)")
+else:
+    st.info("OCR: غير متاح على هذه البيئة. بنحاول نص PDF أول، وإذا فشل نطابق على اسم الملف. (نقدر نفعّله لاحقًا).")
+
+with st.form("f", clear_on_submit=False):
+    u = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود / KSU")
+    m = st.text_input("التخصص", placeholder="مثال: نظم المعلومات الإدارية / MIS")
+    n = st.text_input("الجنسية", placeholder="مثال: سعودي/سعودية")
+    files = st.file_uploader("ارفعي السير الذاتية (PDF / DOCX / TXT / XLSX)", type=["pdf","docx","txt","xlsx"], accept_multiple_files=True)
     use_ocr = st.checkbox("تفعيل OCR للـPDF عند الحاجة", value=True)
-    submitted = st.form_submit_button("فرّز ✅")
+    submit = st.form_submit_button("فرّز ✅")
 
 THRESHOLD = 80
 
-if submitted:
-    if not uploaded:
+if submit:
+    if not files:
         st.warning("ارفعي ملفات أولًا.")
     else:
-        uni_q = normalize_arabic(university)
-        maj_q = normalize_arabic(major)
-        nat_q = normalize_arabic(nationality)
+        uq, mq, nq = normalize_ar(u), normalize_ar(m), normalize_ar(n)
+        rows = []
+        previews = []  # للمعاينات
 
-        rows, errors = [], []
-
-        for f in uploaded:
+        for f in files:
+            ext = (f.name.split(".")[-1]).upper() if "." in f.name else ""
             try:
-                ext = (f.name.split(".")[-1]).lower() if "." in f.name else ""
-                text = get_file_text(f, use_ocr=use_ocr)
+                text, source = safe_text_for(f, use_ocr and OCR_AVAILABLE)
+                # لو ما فيه نص معقول، خذ اسم الملف already done inside
+                uni = fuzzy_score(uq, text) if uq else 0
+                maj = fuzzy_score(mq, text) if mq else 0
+                nat = fuzzy_score(nq, text) if nq else 0
+                hits = sum(s >= THRESHOLD for s in [uni, maj, nat])
 
-                uni_score = fuzzy_score(uni_q, text) if uni_q else 0
-                maj_score = fuzzy_score(maj_q, text) if maj_q else 0
-                nat_score = fuzzy_score(nat_q, text) if nat_q else 0
-
-                hits = sum(s >= THRESHOLD for s in [uni_score, maj_score, nat_score])
-                if hits == 3:
-                    decision = "مطابق قوي"
-                elif hits == 2:
-                    decision = "مطابق مبدئي"
-                else:
-                    decision = "غير مطابق"
+                if hits == 3: decision = "مطابق قوي"
+                elif hits == 2: decision = "مطابق مبدئي"
+                else: decision = "غير مطابق"
 
                 rows.append({
                     "الملف": f.name,
-                    "النوع": ext.upper(),
+                    "النوع": ext,
                     "الحجم KB": file_size_kb(f),
-                    "درجة الجامعة": uni_score,
-                    "درجة التخصص": maj_score,
-                    "درجة الجنسية": nat_score,
+                    "درجة الجامعة": uni,
+                    "درجة التخصص": maj,
+                    "درجة الجنسية": nat,
                     "عدد التطابقات": hits,
-                    "القرار": decision
+                    "القرار": decision,
+                    "المصدر": source
                 })
+
+                previews.append((f.name, text[:180] + ("…" if len(text) > 180 else "")))
+
             except Exception as e:
-                errors.append(f"تعذّر معالجة {f.name}: {e}")
+                rows.append({
+                    "الملف": f.name, "النوع": ext, "الحجم KB": file_size_kb(f),
+                    "درجة الجامعة": 0, "درجة التخصص": 0, "درجة الجنسية": 0,
+                    "عدد التطابقات": 0, "القرار": "خطأ بالمعالجة", "المصدر": f"Exception: {e}"
+                })
+                previews.append((f.name, ""))
 
-        if errors:
-            st.info("بعض الملفات لم تُعالج:")
-            for msg in errors: st.caption(f"• {msg}")
+        df = pd.DataFrame(rows)
+        st.markdown("### النتائج")
+        st.dataframe(df, use_container_width=True)
 
-        if rows:
-            results_df = pd.DataFrame(rows)
-            st.dataframe(results_df, use_container_width=True)
+        # معاينات النص المقروء
+        with st.expander("معاينة النص المقروء لكل ملف (للتشخيص)"):
+            for name, snip in previews:
+                st.markdown(f"**{name}**")
+                st.code(snip or "—")
 
-            # تنزيل CSV
-            csv_buf = io.StringIO()
-            results_df.to_csv(csv_buf, index=False)
-            st.download_button("⬇️ CSV", data=csv_buf.getvalue().encode("utf-8-sig"),
-                file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
-
-            # تنزيل XLSX
-            xlsx_buf = io.BytesIO()
-            with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
-                results_df.to_excel(writer, index=False, sheet_name="Results")
-            st.download_button("⬇️ Excel (XLSX)", data=xlsx_buf.getvalue(),
-                file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-            # تنزيل PDF
-            pdf_buf = io.BytesIO()
-            with PdfPages(pdf_buf) as pdf:
-                fig, ax = plt.subplots(figsize=(11.69, 8.27))
-                ax.axis('off')
-                ax.set_title("تقرير فرز السير الذاتية — صفوة", fontsize=14, pad=14)
-                table = ax.table(cellText=results_df.values, colLabels=results_df.columns,
-                                 loc='center', cellLoc='center')
-                table.auto_set_font_size(False); table.set_fontsize(7); table.scale(1, 1.2)
-                pdf.savefig(fig, bbox_inches='tight'); plt.close(fig)
-            st.download_button("⬇️ PDF", data=pdf_buf.getvalue(),
-                file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf")
-        else:
-            st.warning("ما في نتائج لعرضها.")
+        # تنزيلات
+        # CSV
+        csv_buf = io.StringIO(); df.to_csv(csv_buf, index=False)
+        st.download_button("⬇️ CSV", data=csv_buf.getvalue().encode("utf-8-sig"),
+                           file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv")
+        # XLSX
+        xlsx_buf = io.BytesIO()
+        with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Results")
+        st.download_button("⬇️ Excel (XLSX)", data=xlsx_buf.getvalue(),
+                           file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # PDF
+        pdf_buf = io.BytesIO()
+        with PdfPages(pdf_buf) as pdf:
+            fig, ax = plt.subplots(figsize=(11.69, 8.27))
+            ax.axis('off')
+            ax.set_title("تقرير فرز السير الذاتية — صفوة", fontsize=14, pad=14)
+            show_df = df.copy()
+            if len(show_df) > 30: show_df = show_df.iloc[:30]
+            tbl = ax.table(cellText=show_df.values, colLabels=show_df.columns, loc='center', cellLoc='center')
+            tbl.auto_set_font_size(False); tbl.set_fontsize(7); tbl.scale(1, 1.2)
+            ax.text(0.5, 0.04, f"أُنشئ في: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                    ha='center', va='center', fontsize=9, color="#555")
+            pdf.savefig(fig, bbox_inches='tight'); plt.close(fig)
+        st.download_button("⬇️ PDF", data=pdf_buf.getvalue(),
+                           file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf", mime="application/pdf")
