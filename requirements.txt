@@ -1,4 +1,5 @@
 streamlit==1.36.0
 pdfplumber==0.11.4
+pdfminer.six==20231228
 docx2txt==0.8
 rapidfuzz==3.9.6

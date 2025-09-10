@@ -1,89 +1,147 @@
+# app.py
 import streamlit as st
-import pdfplumber
-import docx2txt
+from pathlib import Path
+import pdfplumber, docx2txt, re, io
 from rapidfuzz import fuzz
-from io import BytesIO
 
-st.set_page_config(page_title="صفوة لفرز السير الذاتية", layout="centered")
-st.title("📄 صفوة لفرز السير الذاتية")
-st.caption("تميّز بخطوة — نسخة محسّنة")
+# ---------------- Page ----------------
+st.set_page_config(page_title="صفوة | فرز السير الذاتية", page_icon=":mag_right:")
 
-# ---------------- دوال مساعدة ----------------
-def normalize_text(text: str) -> str:
-    if not text:
+# ---------------- Helpers ----------------
+AR_DIAC = r"[\u0617-\u061A\u064B-\u0652\u0654\u0655\u0670\u0640]"  # الحركات والتطويل
+
+def normalize_ar(s: str) -> str:
+    if not s:
         return ""
-    text = text.lower()
-    text = text.replace("ة","ه").replace("أ","ا").replace("إ","ا").replace("آ","ا")
-    text = "".join(ch for ch in text if ch.isalnum() or ch.isspace())
-    return text
+    s = s.lower()
+    # حروف موحّدة
+    s = re.sub("[إأآا]", "ا", s)
+    s = re.sub("ى", "ي", s)
+    s = re.sub("ؤ", "و", s)
+    s = re.sub("ئ", "ي", s)
+    s = re.sub("ة", "ه", s)
+    # إزالة حركات/تطويل ورموز
+    s = re.sub(AR_DIAC, "", s)
+    s = re.sub(r"[^\w\s\u0600-\u06FF]", " ", s)  # أبقي العربية والمسافات
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
-def extract_text(file) -> str:
-    text = ""
-    if file.name.endswith(".pdf"):
+def read_file(file) -> str:
+    name = (file.name or "").lower()
+    if name.endswith(".pdf"):
         try:
             with pdfplumber.open(file) as pdf:
-                for page in pdf.pages:
-                    text += page.extract_text() or ""
-        except:
+                pages = []
+                for p in pdf.pages:
+                    t = p.extract_text() or ""
+                    pages.append(t)
+                text = "\n".join(pages)
+        except Exception:
             text = ""
-    elif file.name.endswith(".docx"):
-        try:
-            text = docx2txt.process(file)
-        except:
-            text = ""
-    return normalize_text(text)
+    elif name.endswith(".docx"):
+        # docx2txt يحتاج مسار أو بايتات: نحفظ مؤقتًا
+        data = file.read()
+        text = docx2txt.process(io.BytesIO(data))
+    else:
+        text = file.read().decode("utf-8", errors="ignore")
+    return text or ""
 
-def best_score(needle: str, haystack: str) -> int:
-    """نستخدم token_sort_ratio عشان يقارن حتى لو الكلمات متلخبطة"""
+def best_ratio(needle: str, hay: str) -> int:
+    """
+    نرجّع أعلى نسبة تطابق باستخدام token_set_ratio.
+    إذا النص طويل، نكتفي بأنه موجود مباشرة ليكون 100%.
+    """
     if not needle:
+        return 0
+    if needle in hay:
         return 100
-    n = normalize_text(needle)
-    h = normalize_text(haystack)
-    return fuzz.token_sort_ratio(n, h)
+    # fuzzy
+    return fuzz.token_set_ratio(needle, hay)
 
-def nationality_synonyms(nation: str):
-    """مرادفات الجنسية"""
-    n = normalize_text(nation)
-    if not n:
-        return []
-    if "غير" in n or "وافد" in n or "non" in n:
-        return ["غير سعودي","غيرسعودي","non saudi","nonsaudi","expat","وافد"]
-    return ["سعودي","سعوديه","saudi","ksa","saudi arabia"]
+def decide(university_in, major_in, nation_in, text_norm, thresh=80):
+    uni = normalize_ar(university_in)
+    maj = normalize_ar(major_in)
+    nat = normalize_ar(nation_in)
 
-# ---------------- الواجهة ----------------
-col1, col2 = st.columns(2)
-with col1:
-    university_input = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
-with col2:
-    major_input = st.text_input("التخصص", placeholder="مثال: نظم معلومات إدارية")
+    # نسب التطابق لكل شرط
+    uni_score = best_ratio(uni, text_norm) if uni else 100
+    maj_score = best_ratio(maj, text_norm) if maj else 100
+    nat_score = best_ratio(nat, text_norm) if nat else 100
 
-nation_input = st.text_input("الجنسية", placeholder="مثال: سعودي")
+    return uni_score, maj_score, nat_score, (
+        uni_score >= thresh and maj_score >= thresh and nat_score >= thresh
+    )
 
-uploaded_file = st.file_uploader("✨ ارفع سيرتك الذاتية (PDF أو DOCX)", type=["pdf","docx"])
+# ---------------- UI ----------------
+st.markdown(
+    """
+    <div style="text-align:center;margin-top:10px">
+      <img src="static/logo.png" alt="Safwa" style="width:84px;height:84px;border-radius:14px;"/>
+      <h1 style="margin:8px 0 0">صفوة</h1>
+      <div style="opacity:.75">تميّز بخطوة</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-THRESH = 80  # ثابت
+THRESH = 80  # ثابت ومخفي
 
-if uploaded_file is not None:
-    text = extract_text(uploaded_file)
+colA, colB = st.columns(2)
+with colA:
+    university_in = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
+with colB:
+    major_in = st.text_input("التخصص", placeholder="مثال: نظم المعلومات الإدارية")
 
-    uni_score = best_score(university_input, text)
-    major_score = best_score(major_input, text)
+nation_in = st.text_input("الجنسية", placeholder="مثال: سعودي")
 
-    nat_scores = []
-    if nation_input.strip():
-        for syn in nationality_synonyms(nation_input):
-            nat_scores.append(best_score(syn, text))
-    else:
-        nat_scores = [100]
-    nation_score = max(nat_scores)
+st.markdown("**✨ ارفع سيرتك (PDF أو DOCX)**")
+uploaded_files = st.file_uploader(
+    "Drag & drop", type=["pdf", "docx"], accept_multiple_files=True, label_visibility="collapsed"
+)
 
-    # عرض النتائج
-    colA, colB, colC = st.columns(3)
-    colA.metric("الجامعة", f"{uni_score}%")
-    colB.metric("التخصص", f"{major_score}%")
-    colC.metric("الجنسية", f"{nation_score}%")
+if uploaded_files:
+    # نظهر تنبيه لو النص المستخرج ضعيف
+    for file in uploaded_files:
+        raw = read_file(file)
+        text_norm = normalize_ar(raw)
 
-    if all([uni_score>=THRESH, major_score>=THRESH, nation_score>=THRESH]):
-        st.success(f"✅ مطابق للشروط: {uploaded_file.name}")
-    else:
-        st.error(f"❌ غير مطابق (أحد الشروط أقل من {THRESH}%)")
+        # لو النص المستخرج قليل (PDF مصوّر غالبًا)
+        if len(text_norm) < 80 and file.name.lower().endswith(".pdf"):
+            st.warning("الملف يبدو PDF مصوّر (نص قليل). جرّب DOCX أو PDF نصّي.", icon="⚠️")
+
+        uni_score, maj_score, nat_score, ok = decide(
+            university_in, major_in, nation_in, text_norm, THRESH
+        )
+
+        with st.container(border=True):
+            st.subheader(file.name)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("الجامعة", f"{uni_score:.2f}%")
+            col2.metric("التخصص", f"{maj_score:.2f}%")
+            col3.metric("الجنسية", f"{nat_score:.2f}%")
+
+            if ok:
+                st.success("مطابق للشروط ✅ (كلها ≥ 80%)")
+            else:
+                st.error("غير مطابق ❌ (أحد الشروط أقل من 80%)")
+
+            with st.expander("مقتطف من النص (أوّل 700 حرف)"):
+                st.code((raw or "")[:700])
+
+            with st.expander("القيم بعد التطبيع (للمقارنة)"):
+                st.json(
+                    {
+                        "university_input_norm": normalize_ar(university_in),
+                        "major_input_norm": normalize_ar(major_in),
+                        "nation_input_norm": normalize_ar(nation_in),
+                        "sample_text_norm_start": text_norm[:300],
+                    }
+                )
+
+# ---------------- Style ----------------
+def inject_css(path="static/style.css"):
+    p = Path(path)
+    if p.exists():
+        st.markdown(f"<style>{p.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+
+inject_css()
