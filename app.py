@@ -1,17 +1,17 @@
-# app.py
 import streamlit as st
-from pathlib import Path
 import pdfplumber
 import docx2txt
 from rapidfuzz import fuzz
+from io import BytesIO
 
 # -------- إعدادات الصفحة --------
-st.set_page_config(page_title="صفوة لفرز السير الذاتية", page_icon=":mag:")
+st.set_page_config(page_title="صفوة لفرز السير الذاتية", page_icon=":mag:", layout="centered")
 st.title("📄 صفوة لفرز السير الذاتية")
+st.caption("تميّز بخطوة")
 
 # -------- دوال مساعدة --------
 def normalize_text(text: str) -> str:
-    """تنظيف النص من الرموز الغريبة وتوحيد الشكل"""
+    """تنظيف النص وتوحيد الأشكال"""
     if not text:
         return ""
     text = text.lower()
@@ -20,7 +20,7 @@ def normalize_text(text: str) -> str:
     return text
 
 def extract_text(file) -> str:
-    """محاولة استخراج النص من PDF أو DOCX"""
+    """استخراج النصوص من PDF أو DOCX"""
     text = ""
     if file.name.endswith(".pdf"):
         try:
@@ -36,30 +36,34 @@ def extract_text(file) -> str:
             text = ""
     return normalize_text(text)
 
+def fuzzy_match(needle: str, haystack: str, threshold: int = 80) -> bool:
+    """مطابقة Fuzzy بنسبة ثابتة"""
+    if not needle:
+        return True
+    score = fuzz.partial_ratio(normalize_text(needle), normalize_text(haystack))
+    return score >= threshold
+
 # -------- الواجهة --------
-st.write("✨ حمّل سيرتك الذاتية بصيغة PDF أو DOCX أو XLSX")
+col1, col2 = st.columns(2)
+with col1:
+    university_input = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
+with col2:
+    major_input = st.text_input("التخصص", placeholder="مثال: نظم معلومات إدارية")
 
-uploaded_file = st.file_uploader("إرفع الملف", type=["pdf", "docx", "xlsx"])
+nation_input = st.text_input("الجنسية", placeholder="مثال: سعودي")
 
-university_input = st.text_input("الجامعة")
-major_input = st.text_input("التخصص")
-nation_input = st.text_input("الجنسية")
+uploaded_file = st.file_uploader("✨ ارفع سيرتك الذاتية (PDF أو DOCX)", type=["pdf", "docx"])
 
 if uploaded_file is not None:
     text = extract_text(uploaded_file)
 
-    uni = normalize_text(university_input)
-    major = normalize_text(major_input)
-    nation = normalize_text(nation_input)
+    THRESH = 80  # النسبة ثابتة ومخفية
 
-    THRESH = 80  # النسبة الثابتة
+    uni_ok = fuzzy_match(university_input, text, THRESH)
+    major_ok = fuzzy_match(major_input, text, THRESH)
+    nation_ok = fuzzy_match(nation_input, text, THRESH)
 
-    uni_score = fuzz.partial_ratio(uni, text) if uni else 100
-    major_score = fuzz.partial_ratio(major, text) if major else 100
-    nation_score = fuzz.partial_ratio(nation, text) if nation else 100
-
-    # التحقق النهائي
-    if min(uni_score, major_score, nation_score) >= THRESH:
+    if all([uni_ok, major_ok, nation_ok]):
         st.success(f"✅ مطابق للشروط: {uploaded_file.name}")
     else:
-st.error(f"❌ غير مطابق (واحد أو أكثر أقل من {THRESH}%)")
+        st.error(f"❌ غير مطابق (واحد أو أكثر أقل من {THRESH}%)")
