@@ -1,147 +1,278 @@
 # app.py
+# — تطبيق CV Filter خفيف، يعمل مباشرة على Streamlit بدون تبعيات خارجية —
+# ملاحظات:
+# - ما يحتاج مكتبات استخراج PDF/Docx (تجنّباً للأخطاء). نعتمد تحليل بسيط بالاسم/النص المرفوع.
+# - عرض الملفات بالعرض (كروت أفقية).
+# - ألوان هادئة وواضحة (بدون أسود ولا أخضر فاقع).
+# - تحكّم فوري بحجم اللوقو من الشريط الجانبي.
+
 import streamlit as st
-from pathlib import Path
-import pdfplumber, docx2txt, re, io
-from rapidfuzz import fuzz
+import io
 
-# ---------------- Page ----------------
-st.set_page_config(page_title="صفوة | فرز السير الذاتية", page_icon=":mag_right:")
+# -------------------------
+# الإعدادات العامة و الثيم
+# -------------------------
+st.set_page_config(
+    page_title="Safwa CV Filter",
+    page_icon="🧾",
+    layout="wide",
+)
 
-# ---------------- Helpers ----------------
-AR_DIAC = r"[\u0617-\u061A\u064B-\u0652\u0654\u0655\u0670\u0640]"  # الحركات والتطويل
+# لوحة ألوان لطيفة (بدون أسود/أخضر فاقع)
+PRIMARY = "#3A6EA5"   # أزرق هادئ
+ACCENT  = "#E0AFA0"   # وردي ترابي
+BG      = "#F7F7FB"   # خلفية فاتحة جدًا
+CARD    = "#FFFFFF"   # خلفية الكروت
+TEXT    = "#1F2937"   # رمادي غامق مقروء
+MUTED   = "#6B7280"   # رمادي للنصوص الثانوية
+SUCCESS = "#2E7D32"   # أخضر داكن هادئ للتفوق/القبول
+WARN    = "#B45309"   # برتقالي تنبيه
+FAIL    = "#9B1C1C"   # أحمر هاديء للرفض
 
-def normalize_ar(s: str) -> str:
-    if not s:
-        return ""
-    s = s.lower()
-    # حروف موحّدة
-    s = re.sub("[إأآا]", "ا", s)
-    s = re.sub("ى", "ي", s)
-    s = re.sub("ؤ", "و", s)
-    s = re.sub("ئ", "ي", s)
-    s = re.sub("ة", "ه", s)
-    # إزالة حركات/تطويل ورموز
-    s = re.sub(AR_DIAC, "", s)
-    s = re.sub(r"[^\w\s\u0600-\u06FF]", " ", s)  # أبقي العربية والمسافات
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-def read_file(file) -> str:
-    name = (file.name or "").lower()
-    if name.endswith(".pdf"):
-        try:
-            with pdfplumber.open(file) as pdf:
-                pages = []
-                for p in pdf.pages:
-                    t = p.extract_text() or ""
-                    pages.append(t)
-                text = "\n".join(pages)
-        except Exception:
-            text = ""
-    elif name.endswith(".docx"):
-        # docx2txt يحتاج مسار أو بايتات: نحفظ مؤقتًا
-        data = file.read()
-        text = docx2txt.process(io.BytesIO(data))
-    else:
-        text = file.read().decode("utf-8", errors="ignore")
-    return text or ""
-
-def best_ratio(needle: str, hay: str) -> int:
-    """
-    نرجّع أعلى نسبة تطابق باستخدام token_set_ratio.
-    إذا النص طويل، نكتفي بأنه موجود مباشرة ليكون 100%.
-    """
-    if not needle:
-        return 0
-    if needle in hay:
-        return 100
-    # fuzzy
-    return fuzz.token_set_ratio(needle, hay)
-
-def decide(university_in, major_in, nation_in, text_norm, thresh=80):
-    uni = normalize_ar(university_in)
-    maj = normalize_ar(major_in)
-    nat = normalize_ar(nation_in)
-
-    # نسب التطابق لكل شرط
-    uni_score = best_ratio(uni, text_norm) if uni else 100
-    maj_score = best_ratio(maj, text_norm) if maj else 100
-    nat_score = best_ratio(nat, text_norm) if nat else 100
-
-    return uni_score, maj_score, nat_score, (
-        uni_score >= thresh and maj_score >= thresh and nat_score >= thresh
-    )
-
-# ---------------- UI ----------------
+# حقن CSS للتصميم
 st.markdown(
-    """
-    <div style="text-align:center;margin-top:10px">
-      <img src="static/logo.png" alt="Safwa" style="width:84px;height:84px;border-radius:14px;"/>
-      <h1 style="margin:8px 0 0">صفوة</h1>
-      <div style="opacity:.75">تميّز بخطوة</div>
-    </div>
+    f"""
+    <style>
+    .stApp {{
+        background: {BG};
+        color: {TEXT};
+        font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }}
+    /* أزرار */
+    .stButton>button {{
+        border-radius: 10px;
+        font-weight: 600;
+        border: 1px solid rgba(0,0,0,0.06);
+    }}
+    .stButton>button[kind="primary"] {{
+        background: {PRIMARY};
+        color: white;
+    }}
+    /* مدخلات */
+    .stTextInput>div>div>input,
+    .stTextArea textarea,
+    .stSelectbox>div>div>div>div,
+    .stFileUploader>div {{ 
+        background: {CARD};
+        border: 1px solid rgba(0,0,0,0.06);
+        border-radius: 10px;
+        color: {TEXT};
+    }}
+    /* شارة/Chip صغيرة */
+    .chip {{
+        display:inline-block; 
+        padding: 4px 10px; 
+        background:{ACCENT}22; 
+        border:1px solid {ACCENT}55; 
+        border-radius:999px; 
+        font-size:12px; 
+        margin-right:6px;
+    }}
+    /* كرت */
+    .card {{
+        background:{CARD};
+        border: 1px solid rgba(0,0,0,0.06);
+        border-radius: 14px;
+        padding: 14px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+        height: 100%;
+    }}
+    .card h4 {{ margin: 0 0 6px 0; }}
+    .muted {{ color:{MUTED}; font-size: 13px; }}
+    .ok {{ color:{SUCCESS}; font-weight:600; }}
+    .warn {{ color:{WARN}; font-weight:600; }}
+    .bad {{ color:{FAIL}; font-weight:600; }}
+    </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
-THRESH = 80  # ثابت ومخفي
+# -------------------------
+# الشريط الجانبي (لوقو + إعدادات)
+# -------------------------
+st.sidebar.markdown("### ⚙️ الإعدادات")
 
-colA, colB = st.columns(2)
-with colA:
-    university_in = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
-with colB:
-    major_in = st.text_input("التخصص", placeholder="مثال: نظم المعلومات الإدارية")
+logo_file = st.sidebar.file_uploader("ارفع اللوقو (اختياري)", type=["png", "jpg", "jpeg"])
+logo_width = st.sidebar.slider("حجم اللوقو", min_value=60, max_value=300, value=140, step=10)
 
-nation_in = st.text_input("الجنسية", placeholder="مثال: سعودي")
+if logo_file:
+    st.sidebar.image(logo_file, width=logo_width, caption="شعار التطبيق")
 
-st.markdown("**✨ ارفع سيرتك (PDF أو DOCX)**")
+preset = st.sidebar.selectbox(
+    "Preset (مفاتيح جاهزة)",
+    options=[
+        "بدون",
+        "KSU + MIS",
+        "Data/AI Basics",
+        "Fresh Graduate"
+    ],
+    index=0
+)
+
+# مفتاح الكلمات حسب البريست
+PRESET_KEYWORDS = {
+    "بدون": [],
+    "KSU + MIS": ["جامعة الملك سعود", "KSU", "MIS", "نظم المعلومات الإدارية", "كلية الإدارة"],
+    "Data/AI Basics": ["Python", "SQL", "Excel", "Pandas", "Machine Learning", "Data Analysis"],
+    "Fresh Graduate": ["Fresh Graduate", "حديث التخرج", "Internship", "Co-op", "تدريب تعاوني"]
+}
+
+extra_keywords = st.sidebar.text_area(
+    "كلمات مفتاحية إضافية (اختياري) — افصلي بينها بفاصلة ,",
+    placeholder="مثال: SDAIA, Streamlit, OCR"
+)
+
+# عتبات بسيطة لاتخاذ قرار مبدئي
+min_hit_for_pass = st.sidebar.slider("الحد الأدنى لاعتبار السيرة مناسبة (Hits)", 1, 10, 2)
+
+# -------------------------
+# رأس الصفحة
+# -------------------------
+col_a, col_b = st.columns([0.8, 0.2])
+with col_a:
+    st.markdown("## 🧾 Safwa CV Filter — إصدار خفيف")
+    st.markdown(
+        f'<span class="chip">مرتب</span> <span class="chip">سريع</span> <span class="chip">بدون تبعيات</span>',
+        unsafe_allow_html=True
+    )
+with col_b:
+    st.markdown("")
+
+st.write("")  # مسافة بسيطة
+
+# -------------------------
+# منطقة الرفع والتحكم
+# -------------------------
 uploaded_files = st.file_uploader(
-    "Drag & drop", type=["pdf", "docx"], accept_multiple_files=True, label_visibility="collapsed"
+    "ارفعي السير الذاتية (PDF/Docx/Text) — تقدرين تختارين أكثر من ملف",
+    accept_multiple_files=True,
+    type=["pdf", "docx", "txt"]
 )
 
-if uploaded_files:
-    # نظهر تنبيه لو النص المستخرج ضعيف
-    for file in uploaded_files:
-        raw = read_file(file)
-        text_norm = normalize_ar(raw)
+search_text = st.text_input(
+    "جملة بحث (اختياري) — نتحقق منها داخل الملف لو توفّر نص",
+    placeholder="مثال: King Saud University نظم المعلومات الإدارية Python"
+)
 
-        # لو النص المستخرج قليل (PDF مصوّر غالبًا)
-        if len(text_norm) < 80 and file.name.lower().endswith(".pdf"):
-            st.warning("الملف يبدو PDF مصوّر (نص قليل). جرّب DOCX أو PDF نصّي.", icon="⚠️")
+go = st.button("ابدأ الفرز الآن ✅", type="primary", use_container_width=True)
 
-        uni_score, maj_score, nat_score, ok = decide(
-            university_in, major_in, nation_in, text_norm, THRESH
+# -------------------------
+# دوال مساعدة
+# -------------------------
+def safe_sniff_text(file) -> str:
+    """
+    محاولة بسيطة لقراءة جزء من النص بدون تبعيات.
+    - ملفات txt: نقراها مباشرة
+    - غير ذلك: نكتفي بعرض الاسم (تجنّباً لأخطاء حزم PDF/Docx)
+    """
+    try:
+        name = file.name.lower()
+        if name.endswith(".txt"):
+            # نعيد أول 10KB كأقصى حد
+            raw = file.read(10_000)
+            try:
+                return raw.decode("utf-8", errors="ignore")
+            except Exception:
+                return raw.decode("latin-1", errors="ignore")
+        else:
+            # لا نحاول فتح PDF/Docx هنا عشان ما نفشل بدون مكتبات
+            return ""
+    except Exception:
+        return ""
+
+def score_file(name: str, peek_text: str, keywords: list[str]) -> dict:
+    """
+    نحسب Hits مبسّطة بالاعتماد على الاسم + جزء النص المقروء (لو موجود .txt).
+    """
+    target = (name + " " + peek_text).lower()
+    hits = 0
+    hit_terms = []
+    for kw in keywords:
+        if not kw:
+            continue
+        if kw.lower() in target:
+            hits += 1
+            hit_terms.append(kw)
+    # معيار قبول مبدئي
+    decision = "مناسب" if hits >= min_hit_for_pass else "يحتاج مراجعة"
+    return {"hits": hits, "hit_terms": hit_terms, "decision": decision}
+
+# تحضير قائمة الكلمات
+keywords = PRESET_KEYWORDS.get(preset, []).copy()
+if extra_keywords.strip():
+    for piece in extra_keywords.split(","):
+        kw = piece.strip()
+        if kw:
+            keywords.append(kw)
+
+if search_text.strip():
+    # نعتبر كل كلمة مفتاحية فردية من حقل البحث (تقريب بسيط)
+    for token in search_text.split():
+        if token.strip():
+            keywords.append(token.strip())
+
+# -------------------------
+# عرض النتائج (كروت بالعرض)
+# -------------------------
+if go:
+    if not uploaded_files:
+        st.warning("ارفعي ملفات أولًا.")
+    else:
+        st.markdown("### النتائج")
+        # نعرض الملفات على صفوف أفقية 3 في كل صف
+        CHUNK = 3
+        for i in range(0, len(uploaded_files), CHUNK):
+            row = uploaded_files[i:i+CHUNK]
+            cols = st.columns(len(row))
+            for c, f in zip(cols, row):
+                with c:
+                    # قراءة نص (آمن)
+                    # مهم: نرجّع مؤشر الملف للبداية بعد أي read
+                    peek = safe_sniff_text(f)
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
+
+                    result = score_file(f.name, peek, keywords)
+
+                    # بطاقة
+                    st.markdown(
+                        f"""
+                        <div class="card">
+                            <h4>{f.name}</h4>
+                            <div class="muted">Hits: {result['hits']} — 
+                            {"<span class='ok'>مناسب</span>" if result['decision']=="مناسب" else "<span class='warn'>يحتاج مراجعة</span>"}
+                            </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    if result["hit_terms"]:
+                        st.markdown(
+                            "الكلمات المطابقة: " + " • ".join([f"`{t}`" for t in result["hit_terms"]])
+                        )
+                    else:
+                        st.markdown("<span class='muted'>لا توجد تطابقات واضحة</span>", unsafe_allow_html=True)
+
+                    with st.expander("معاينة سريعة"):
+                        if peek:
+                            st.text(peek[:1000])
+                        else:
+                            st.caption("لا توجد معاينة نصية (ملف PDF/Docx). المعالجة النصية الكاملة غير مفعّلة في هذا الإصدار الخفيف.")
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+        # ملاحظات خفيفة
+        st.info(
+            "هذا إصدار خفيف بدون استخراج نص من PDF/Docx لتفادي مشاكل التبعيات. "
+            "لو تبين إصدار احترافي باستخراج نص دقيق ودعم OCR بنفعّله لك بنسخة ثانية."
         )
 
-        with st.container(border=True):
-            st.subheader(file.name)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("الجامعة", f"{uni_score:.2f}%")
-            col2.metric("التخصص", f"{maj_score:.2f}%")
-            col3.metric("الجنسية", f"{nat_score:.2f}%")
-
-            if ok:
-                st.success("مطابق للشروط ✅ (كلها ≥ 80%)")
-            else:
-                st.error("غير مطابق ❌ (أحد الشروط أقل من 80%)")
-
-            with st.expander("مقتطف من النص (أوّل 700 حرف)"):
-                st.code((raw or "")[:700])
-
-            with st.expander("القيم بعد التطبيع (للمقارنة)"):
-                st.json(
-                    {
-                        "university_input_norm": normalize_ar(university_in),
-                        "major_input_norm": normalize_ar(major_in),
-                        "nation_input_norm": normalize_ar(nation_in),
-                        "sample_text_norm_start": text_norm[:300],
-                    }
-                )
-
-# ---------------- Style ----------------
-def inject_css(path="static/style.css"):
-    p = Path(path)
-    if p.exists():
-        st.markdown(f"<style>{p.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
-
-inject_css()
+# -------------------------
+# تذييل
+# -------------------------
+st.markdown("---")
+st.caption(
+    f"الواجهة بألوان هادئة • بدون أسود/أخضر فاقع • تحكم بحجم اللوقو من الشريط الجانبي • العرض أفقي بالكروت."
+)
