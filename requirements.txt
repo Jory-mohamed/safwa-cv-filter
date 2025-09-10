@@ -6,3 +6,6 @@ arabic-reshaper
 python-bidi
 rapidfuzz
 openpyxl
+pytesseract
+pymupdf
+Pillow
