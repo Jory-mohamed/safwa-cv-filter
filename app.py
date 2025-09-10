@@ -4,23 +4,20 @@ import docx2txt
 from rapidfuzz import fuzz
 from io import BytesIO
 
-# -------- إعدادات الصفحة --------
-st.set_page_config(page_title="صفوة لفرز السير الذاتية", page_icon=":mag:", layout="centered")
+st.set_page_config(page_title="صفوة لفرز السير الذاتية", layout="centered")
 st.title("📄 صفوة لفرز السير الذاتية")
-st.caption("تميّز بخطوة")
+st.caption("تميّز بخطوة — نسخة محسّنة")
 
-# -------- دوال مساعدة --------
+# ---------------- دوال مساعدة ----------------
 def normalize_text(text: str) -> str:
-    """تنظيف النص وتوحيد الأشكال"""
     if not text:
         return ""
     text = text.lower()
-    text = text.replace("ة", "ه").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    text = text.replace("ة","ه").replace("أ","ا").replace("إ","ا").replace("آ","ا")
     text = "".join(ch for ch in text if ch.isalnum() or ch.isspace())
     return text
 
 def extract_text(file) -> str:
-    """استخراج النصوص من PDF أو DOCX"""
     text = ""
     if file.name.endswith(".pdf"):
         try:
@@ -36,14 +33,24 @@ def extract_text(file) -> str:
             text = ""
     return normalize_text(text)
 
-def fuzzy_match(needle: str, haystack: str, threshold: int = 80) -> bool:
-    """مطابقة Fuzzy بنسبة ثابتة"""
+def best_score(needle: str, haystack: str) -> int:
+    """نستخدم token_sort_ratio عشان يقارن حتى لو الكلمات متلخبطة"""
     if not needle:
-        return True
-    score = fuzz.partial_ratio(normalize_text(needle), normalize_text(haystack))
-    return score >= threshold
+        return 100
+    n = normalize_text(needle)
+    h = normalize_text(haystack)
+    return fuzz.token_sort_ratio(n, h)
 
-# -------- الواجهة --------
+def nationality_synonyms(nation: str):
+    """مرادفات الجنسية"""
+    n = normalize_text(nation)
+    if not n:
+        return []
+    if "غير" in n or "وافد" in n or "non" in n:
+        return ["غير سعودي","غيرسعودي","non saudi","nonsaudi","expat","وافد"]
+    return ["سعودي","سعوديه","saudi","ksa","saudi arabia"]
+
+# ---------------- الواجهة ----------------
 col1, col2 = st.columns(2)
 with col1:
     university_input = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
@@ -52,18 +59,31 @@ with col2:
 
 nation_input = st.text_input("الجنسية", placeholder="مثال: سعودي")
 
-uploaded_file = st.file_uploader("✨ ارفع سيرتك الذاتية (PDF أو DOCX)", type=["pdf", "docx"])
+uploaded_file = st.file_uploader("✨ ارفع سيرتك الذاتية (PDF أو DOCX)", type=["pdf","docx"])
+
+THRESH = 80  # ثابت
 
 if uploaded_file is not None:
     text = extract_text(uploaded_file)
 
-    THRESH = 80  # النسبة ثابتة ومخفية
+    uni_score = best_score(university_input, text)
+    major_score = best_score(major_input, text)
 
-    uni_ok = fuzzy_match(university_input, text, THRESH)
-    major_ok = fuzzy_match(major_input, text, THRESH)
-    nation_ok = fuzzy_match(nation_input, text, THRESH)
+    nat_scores = []
+    if nation_input.strip():
+        for syn in nationality_synonyms(nation_input):
+            nat_scores.append(best_score(syn, text))
+    else:
+        nat_scores = [100]
+    nation_score = max(nat_scores)
 
-    if all([uni_ok, major_ok, nation_ok]):
+    # عرض النتائج
+    colA, colB, colC = st.columns(3)
+    colA.metric("الجامعة", f"{uni_score}%")
+    colB.metric("التخصص", f"{major_score}%")
+    colC.metric("الجنسية", f"{nation_score}%")
+
+    if all([uni_score>=THRESH, major_score>=THRESH, nation_score>=THRESH]):
         st.success(f"✅ مطابق للشروط: {uploaded_file.name}")
     else:
-        st.error(f"❌ غير مطابق (واحد أو أكثر أقل من {THRESH}%)")
+        st.error(f"❌ غير مطابق (أحد الشروط أقل من {THRESH}%)")
