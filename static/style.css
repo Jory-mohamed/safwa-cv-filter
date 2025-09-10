@@ -1,0 +1,45 @@
+:root{
+  --bg:#F7F6F2;        /* خلفية فاتحة */
+  --ink:#0A1A2F;       /* كحلي الهوية */
+  --muted:#6B7280;     /* رمادي نص ثانوي */
+  --card:#FFFFFF;
+  --ring:#D1D5DB;
+}
+
+html, body { background: var(--bg) !important; }
+.block-container { padding-top: 24px !important; max-width: 860px; }
+
+h1, h2, h3, .page-title {
+  color: var(--ink) !important;
+  text-align: center;
+  margin: 0.25rem 0 0.75rem;
+  font-weight: 800;
+}
+.tagline{
+  text-align:center; color:var(--muted); margin:-6px 0 18px 0;
+}
+
+/* صناديق الإدخال */
+.stTextInput > div > div input{
+  background: var(--card) !important;
+  border: 1px solid var(--ring) !important;
+  direction: rtl;
+}
+label{ color: var(--ink) !important; font-weight:600; }
+
+/* زر أساسي */
+.stButton button{
+  background: var(--ink) !important;
+  color: white !important;
+  border-radius: 10px !important;
+  padding: 10px 18px !important;
+  font-weight:700;
+}
+
+/* رافع الملفات */
+.stFileUploader{
+  background: var(--card);
+  border: 2px dashed var(--ring);
+  border-radius: 14px;
+  padding: 10px;
+}

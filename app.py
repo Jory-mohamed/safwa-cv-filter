@@ -1,211 +1,168 @@
-# app.py
+# -*- coding: utf-8 -*-
+# صفوة لفرز السير الذاتية – نسخة نهائية
+
+import io
+from pathlib import Path
+
 import streamlit as st
-from pathlib import Path
-
-# تحديد مسار اللوقو داخل مجلد static
-logo_path = Path("static/logo.png")
-
-# عرض اللوقو في أعلى الصفحة
-st.image(str(logo_path), width=120)  # تقدرِ تتحكمي بالحجم من widthimport streamlit as st
-from io import BytesIO
-from pathlib import Path
-from typing import List
-
-# قراءة الصيغ
-from PyPDF2 import PdfReader
-import docx2txt
-import pandas as pd
-
-# Fuzzy matching
 from rapidfuzz import fuzz
 
-# ---------------- Config & CSS ----------------
+# ===== إعداد عام =====
 st.set_page_config(
-    page_title="صفوة | فرز السير الذاتية",
-    page_icon="static/logo.png",
+    page_title="صفوة لفرز السير الذاتية",
+    page_icon="🔎",
     layout="centered"
 )
 
-# تحميل CSS
+# تحميل CSS مخصص (اختياري)
 css_path = Path("static/style.css")
 if css_path.exists():
     st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-# هيدر + لوقو
-logo_exists = Path("static/logo.png").exists()
+# ثابت المطابقة (مخفي)
+THRESH = 80
+
+# ===== رأس الصفحة (لوقو + عنوان) =====
+logo_path = Path("static/logo.png")
+if logo_path.exists():
+    st.image(str(logo_path), width=140)
 st.markdown(
-    f"""
-    <div class="brand">
-        {'<img src="static/logo.png" alt="Safwa Logo"/>' if logo_exists else ''}
-        <div class="title">
-            <h1>صفوة</h1>
-            <small>تميّز بخطوة</small>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True
+    "<h1 class='page-title'>صفوة لفرز السير الذاتية</h1>"
+    "<p class='tagline'>تميّز بخطوة</p>",
+    unsafe_allow_html=True,
 )
 
-st.markdown("### فرز السير الذاتية")
+# ===== الحقول =====
+col1, col2 = st.columns(2)
+with col1:
+    uni = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
+with col2:
+    major = st.text_input("التخصص", placeholder="مثال: نظم المعلومات الإدارية")
 
-# ---------------- Helpers ----------------
+nation = st.text_input("الجنسية", placeholder="مثال: سعودي / غير سعودي")
+st.caption("الصيغ المسموحة: PDF / DOCX / XLSX (حتى 200MB لكل ملف).")
+
+files = st.file_uploader(
+    "أرفقي الملفات",
+    type=["pdf", "docx", "xlsx"],
+    accept_multiple_files=True
+)
+
+run = st.button("ابدأ الفرز الآن", type="primary")
+
+st.divider()
+st.subheader("النتائج")
+
+# ===== توابع مساعدة =====
 AR_DIACS = "".join([
-    "\u064b", "\u064c", "\u064d", "\u064e", "\u064f", "\u0650", "\u0651", "\u0652", "\u0670"
+    "\u064B", "\u064C", "\u064D", "\u064E", "\u064F", "\u0650", "\u0651", "\u0652", "\u0670", "\u0653"
 ])
 
 def normalize_ar(s: str) -> str:
     if not s:
         return ""
-    # إزالة التشكيل
+    s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    s = s.replace("ى", "ي").replace("ئ", "ي").replace("ؤ", "و")
+    s = s.replace("ـ", "")  # تطويل
     for d in AR_DIACS:
         s = s.replace(d, "")
-    # توحيد الألفات و الهاء/ة والياء
-    repl = {
-        "أ":"ا", "إ":"ا", "آ":"ا",
-        "ة":"ه",
-        "ى":"ي",
-        "ؤ":"و", "ئ":"ي",
-        "ٔ":"", "ٰ":""
-    }
-    for k,v in repl.items():
-        s = s.replace(k, v)
-    return s
+    return s.lower().strip()
 
-def text_from_pdf(file: BytesIO) -> str:
-    out = []
-    reader = PdfReader(file)
-    for p in reader.pages:
-        try:
-            t = p.extract_text() or ""
-        except Exception:
-            t = ""
-        out.append(t)
-    return "\n".join(out)
+def read_pdf(file) -> str:
+    from PyPDF2 import PdfReader
+    text_parts = []
+    try:
+        reader = PdfReader(file)
+        for p in reader.pages:
+            try:
+                text_parts.append(p.extract_text() or "")
+            except Exception:
+                pass
+    except Exception:
+        # في بعض المنصات نحتاج إعادة البافر
+        data = file.read()
+        bio = io.BytesIO(data)
+        reader = PdfReader(bio)
+        for p in reader.pages:
+            text_parts.append(p.extract_text() or "")
+    return "\n".join(text_parts)
 
-def text_from_docx(file: BytesIO) -> str:
-    # docx2txt يحتاج مسار: نكتب الملف مؤقتاً
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".docx", delete=True) as tmp:
-        tmp.write(file.read())
-        tmp.flush()
-        return docx2txt.process(tmp.name) or ""
+def read_docx(file) -> str:
+    import docx2txt
+    data = file.read()
+    bio = io.BytesIO(data)
+    return docx2txt.process(bio) or ""
 
-def text_from_xlsx(file: BytesIO) -> str:
-    out = []
+def read_xlsx(file) -> str:
+    import pandas as pd
+    text_parts = []
     try:
         xls = pd.ExcelFile(file)
-        for sh in xls.sheet_names:
-            df = xls.parse(sh, dtype=str).fillna("")
-            out.append("\n".join([" ".join(row) for row in df.values]))
     except Exception:
-        # محاولة مباشرة
+        # أحيانًا يحتاج BytesIO
+        data = file.read()
+        xls = pd.ExcelFile(io.BytesIO(data))
+    for name in xls.sheet_names:
         try:
-            df = pd.read_excel(file, dtype=str).fillna("")
-            out.append("\n".join([" ".join(row) for row in df.values]))
+            df = xls.parse(name)
+            text_parts.append(name)
+            text_parts.append(df.head(50).to_string(index=False))
         except Exception:
             pass
-    return "\n".join(out)
+    return "\n".join(text_parts)
 
-def fuzzy_found(needle: str, haystack: str, thresh: int = 80) -> bool:
-    if not needle.strip():
-        return True
-    a = normalize_ar(needle).lower()
-    b = normalize_ar(haystack).lower()
-    # استخدم token_set_ratio عشان اختلاف الترتيب
-    score = fuzz.token_set_ratio(a, b)
-    return score >= thresh
+def fuzzy_all_present(haystack: str, needles: list[str], threshold: int = 80) -> bool:
+    """
+    يعتبر الشرط محقّقًا إذا كانت أي صياغة من العبارة موجودة بتشابه >= threshold.
+    نستخدم token_set_ratio لأنها أمتن مع اختلاف الترتيب.
+    """
+    H = normalize_ar(haystack)
+    for raw in needles:
+        q = normalize_ar(raw)
+        if not q:  # حقل فارغ -> نتجاهله
+            continue
+        score = fuzz.token_set_ratio(q, H)
+        if score < threshold:
+            return False
+    return True
 
-def nationality_keywords(value: str) -> List[str]:
-    v = normalize_ar(value).lower().strip()
-    if not v:
-        return []
-    saudi = [
-        "سعودي", "سعوديه", "سعوديه", "مواطن سعودي",
-        "saudi", "saudi arabia", "ksa", "saudi national"
-    ]
-    non_saudi = [
-        "غير سعودي", "غير سعوديه", "غيرسعودي",
-        "non-saudi", "non saudi", "expat", "غير سعودي الجنسية"
-    ]
-    if "غير" in v or "non" in v:
-        return non_saudi
-    else:
-        return saudi
-
-def read_any(file) -> str:
-    name = file.name.lower()
-    data = file.read()
-    buf = BytesIO(data)
-    if name.endswith(".pdf"):
-        return text_from_pdf(buf)
-    elif name.endswith(".docx"):
-        return text_from_docx(BytesIO(data))  # مرر نسخة جديدة
-    elif name.endswith(".xlsx"):
-        return text_from_xlsx(BytesIO(data))
-    return ""
-
-# ---------------- UI ----------------
-with st.container():
-    st.markdown('<div class="form-card">', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    uni   = c1.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
-    major = c2.text_input("التخصص", placeholder="مثال: نظم معلومات إدارية")
-    nation = st.text_input("الجنسية", placeholder="مثال: سعودي / غير سعودي / Saudi / Non-Saudi")
-
-    files = st.file_uploader(
-        "إرفاق ملفات CV (PDF / DOCX / XLSX)",
-        type=["pdf","docx","xlsx"],
-        accept_multiple_files=True
-    )
-    run = st.button("ابدأ الفرز الآن", type="primary")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ثابت ومخفي: حد المطابقة 80
-THRESH = 80
-
-# ---------------- Logic ----------------
+# ===== التنفيذ =====
 if run:
     if not files:
-        st.warning("فضلاً أرفقي ملفاً واحداً على الأقل.")
+        st.warning("رجاءً أرفقي ملفًا واحدًا على الأقل.")
     else:
-        with st.status("جارٍ قراءة الملفات…", expanded=False):
-            results = []
-            for f in files:
-                try:
-                    content = read_any(f)
-                except Exception:
-                    content = ""
-                ok_uni   = fuzzy_found(uni, content, THRESH) if uni.strip() else True
-                ok_major = fuzzy_found(major, content, THRESH) if major.strip() else True
+        needles = [uni, major, nation]
+        ok = 0
+        for file in files:
+            name = file.name
+            ext = name.split(".")[-1].lower()
 
-                ok_nation = True
-                if nation.strip():
-                    nkeys = nationality_keywords(nation)
-                    if nkeys:
-                        ok_nation = any(fuzzy_found(k, content, THRESH) for k in nkeys)
+            # قراءة المحتوى
+            try:
+                if ext == "pdf":
+                    content = read_pdf(file)
+                elif ext == "docx":
+                    content = read_docx(file)
+                elif ext == "xlsx":
+                    content = read_xlsx(file)
+                else:
+                    st.error(f"⚠️ صيغة غير مدعومة: {ext}")
+                    continue
+            except Exception as e:
+                st.error(f"تعذّرت قراءة {name} — {e}")
+                continue
 
-                passed = (ok_uni and ok_major and ok_nation)
-                results.append((f.name, passed, ok_uni, ok_major, ok_nation))
+            # المطابقة
+            try:
+                is_match = fuzzy_all_present(content, needles, THRESH)
+            except Exception as e:
+                st.error(f"تعذّرت مطابقة {name} — {e}")
+                continue
 
-        st.markdown("### النتائج")
-        any_pass = False
-        for name, passed, ou, om, on in results:
-            if passed:
-                any_pass = True
-                st.success(f"✅ مطابق للشروط: **{name}**")
+            if is_match:
+                st.success(f"✅ {name} — مطابق للشروط (عتبة {THRESH}%)")
+                ok += 1
             else:
-                msgs = []
-                if not ou: msgs.append("الجامعة")
-                if not om: msgs.append("التخصص")
-                if not on: msgs.append("الجنسية")
-                detail = "، ".join(msgs) if msgs else "غير محدد"
-                st.error(f"❌ غير مطابق: **{name}** — لم تتحقق: {detail}")
+                st.error(f"❌ {name} — غير مطابق (أقل من {THRESH}%)")
 
-        if not any_pass:
-            st.info("لا توجد نتائج مطابقة بناءً على المعايير المدخلة.")
-
-# تذييل صغير
-st.markdown(
-    "<div style='text-align:center;color:#9aa3b2;margin-top:18px'>© صفوة — تميّز بخطوة</div>",
-    unsafe_allow_html=True
-)
+        st.info(f"انتهى الفرز. الملفات المطابقة: {ok}")
