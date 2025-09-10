@@ -1,13 +1,14 @@
-# app.py
 import streamlit as st
 from io import BytesIO
 import pdfplumber
 from rapidfuzz import fuzz
 
-# ---------------- Page ----------------
+# -------- إعداد الصفحة --------
 st.set_page_config(page_title="صفوة • فرز السير الذاتية", layout="centered")
+st.title("صفوة لفرز السير الذاتية")
+st.caption("تميّز بخطوة — نسخة تشخيصية (تبيّن الدرجات لكل شرط)")
 
-# ---------------- Helpers ----------------
+# -------- أدوات مساعدة --------
 AR_DIACRITICS = "".join([
     "\u0610","\u0611","\u0612","\u0613","\u0614","\u0615","\u0616","\u0617","\u0618","\u0619","\u061A",
     "\u064B","\u064C","\u064D","\u064E","\u064F","\u0650","\u0651","\u0652","\u0653","\u0654","\u0655",
@@ -20,93 +21,103 @@ def normalize_ar(s: str) -> str:
     if not s:
         return ""
     s = s.strip()
-    # remove diacritics & tatweel
-    for ch in AR_DIACRITICS:
-        s = s.replace(ch, "")
-    s = s.replace("ـ","")
-    # unify alef/hamza forms
-    s = (s.replace("أ","ا")
-           .replace("إ","ا")
-           .replace("آ","ا")
-           .replace("ٱ","ا")
-           .replace("ؤ","و")
-           .replace("ئ","ي"))
-    # taa marbuta / alif maqsura
-    s = s.replace("ى","ي").replace("ة","ه")
-    # numbers/latin spacing normalizer
-    return " ".join(s.split()).lower()
+    for ch in AR_DIACRITICS: s = s.replace(ch, "")
+    s = s.replace("ـ","")  # تطويل
+    s = (s.replace("أ","ا").replace("إ","ا").replace("آ","ا").replace("ٱ","ا")
+           .replace("ؤ","و").replace("ئ","ي").replace("ى","ي").replace("ة","ه"))
+    s = " ".join(s.split()).lower()
+    return s
 
 def read_pdf_text(file_bytes: bytes) -> str:
-    txt_parts = []
+    txt = []
     with pdfplumber.open(BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
             try:
                 t = page.extract_text() or ""
             except Exception:
                 t = ""
-            if t:
-                txt_parts.append(t)
-    return "\n".join(txt_parts)
+            txt.append(t)
+    return "\n".join(txt).strip()
 
-def fuzzy_contains(needle: str, haystack: str, threshold: int = 80) -> bool:
-    n = normalize_ar(needle)
-    h = normalize_ar(haystack)
-    if not n or not h:
-        return False
-    return fuzz.partial_ratio(n, h) >= threshold
+def best_fuzzy_score(query: str, hay: str) -> int:
+    """أعلى درجة بين partial_ratio و token_set_ratio بعد التطبيع."""
+    q = normalize_ar(query)
+    h = normalize_ar(hay)
+    if not q or not h:
+        return 0
+    return max(fuzz.partial_ratio(q, h), fuzz.token_set_ratio(q, h))
 
-# ---------------- UI ----------------
-st.markdown(
-    """
-    <div style="text-align:center;margin:12px 0 6px 0;">
-      <img src="static/logo.png" alt="Safwa" height="64">
-      <h1 style="margin:8px 0 0 0;">صفوة</h1>
-      <div style="color:#0A1A2F;opacity:0.8;">تميّز بخطوة</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+def nationality_synonyms(raw: str):
+    v = normalize_ar(raw)
+    if not v: return []
+    SAUDI = ["سعودي","سعوديه","saudi","ksa","saudi arabia","مواطن سعودي","سعودي الجنسيه"]
+    NON   = ["غير سعودي","غيرسعودي","non saudi","nonsaudi","expat","وافد","غير سعودي الجنسيه","غير سعودي الجنسية"]
+    if "غير" in v or "non" in v or "وافد" in v:
+        return NON
+    return SAUDI
 
-col1, col2 = st.columns(2)
-with col1:
+# -------- واجهة --------
+c1, c2 = st.columns(2)
+with c1:
     uni = st.text_input("الجامعة", placeholder="مثال: جامعة الملك سعود")
-with col2:
-    major = st.text_input("التخصص", placeholder="مثال: نظم المعلومات الإدارية")
+with c2:
+    major = st.text_input("التخصص", placeholder="مثال: نظم معلومات إدارية")
+nation = st.text_input("الجنسية", placeholder="مثال: سعودي / غير سعودي / Saudi / Non-Saudi")
 
-nation = st.text_input("الجنسية", placeholder="مثال: سعودي / غير سعودي")
-# الإضافي مخفي/ملغي حسب رغبتك – إن أردته لاحقاً أعيده
-# extra = st.text_input("كلمات اختيارية (اختياري)")
+uploaded = st.file_uploader("أرفق ملفات (PDF فقط في التشخيص)", type=["pdf"], accept_multiple_files=True)
 
-uploaded = st.file_uploader("أرفق ملفات CV (PDF فقط الآن)", type=["pdf"], accept_multiple_files=True)
+THRESH = 80  # ثابت ومخفي في النسخة النهائية
 
-# نسبة المطابقة ثابتة 80 (مخفية كما طلبت)
-THRESH = 80
+debug = st.checkbox("إظهار التشخيص التفصيلي (مقتطف نص + القيم بعد التطبيع)", value=True)
 
-if st.button("ابدأ الفرز"):
+if st.button("ابدأ الفرز الآن"):
     if not uploaded:
         st.warning("فضلاً ارفع ملفاً واحداً على الأقل.")
     else:
-        for file in uploaded:
-            try:
-                raw = file.read()
-                content = read_pdf_text(raw)
+        for up in uploaded:
+            raw = up.read()
+            text = read_pdf_text(raw)
+            text_len = len(text)
+            st.markdown(f"### {up.name}")
+            st.caption(f"طول النص المستخرج: {text_len} حرف")
 
-                # Debug لمساعدتك: إظهار مقتطف صغير من النص المستخرج (اختياري)
-                with st.expander(f"نص مستخرج من {file.name}"):
-                    preview = (content or "")[:1000]
-                    st.code(preview if preview else "لم يُستخرج نص (قد يكون الملف صورة ممسوحة).", language="text")
+            if text_len == 0:
+                st.error("لا يوجد نص مستخرج — غالبًا PDF عبارة عن صورة ممسوحة (يحتاج OCR).")
+                continue
 
-                conditions = [
-                    fuzzy_contains(uni, content) if uni.strip() else True,
-                    fuzzy_contains(major, content) if major.strip() else True,
-                    fuzzy_contains(nation, content) if nation.strip() else True,
-                    # fuzzy_contains(extra, content) if extra.strip() else True,  # لو رجعناه
-                ]
+            # حساب الدرجات
+            sc_uni   = best_fuzzy_score(uni, text)   if uni.strip()   else 100
+            sc_major = best_fuzzy_score(major, text) if major.strip() else 100
+            if nation.strip():
+                keys = nationality_synonyms(nation)
+                sc_nat = max([best_fuzzy_score(k, text) for k in keys]) if keys else best_fuzzy_score(nation, text)
+            else:
+                sc_nat = 100
 
-                if all(conditions):
-                    st.success(f"✅ مطابق — {file.name}")
-                else:
-                    st.error(f"❌ غير مطابق — {file.name}")
+            # عرض الدرجات
+            colA, colB, colC = st.columns(3)
+            colA.metric("الجامعة",  f"{sc_uni}%")
+            colB.metric("التخصص",  f"{sc_major}%")
+            colC.metric("الجنسية", f"{sc_nat}%")
 
-            except Exception as e:
-                st.error(f"تعذّر قراءة {file.name}: {e}")
+            all_ok = all([
+                sc_uni   >= THRESH,
+                sc_major >= THRESH,
+                sc_nat   >= THRESH
+            ])
+
+            if all_ok:
+                st.success("✅ مطابق للشروط")
+            else:
+                st.error("❌ غير مطابق (واحد أو أكثر أقل من 80%)")
+
+            if debug:
+                with st.expander("مقتطف من النص (أول 1000 حرف)"):
+                    st.code(text[:1000] or "لا يوجد نص", language="text")
+                with st.expander("القيم بعد التطبيع (كيف نقارن)"):
+                    st.write({
+                        "university_input_norm": normalize_ar(uni),
+                        "major_input_norm": normalize_ar(major),
+                        "nation_input_norm": normalize_ar(nation),
+                        "sample_text_norm_start": normalize_ar(text[:300])
+                    })
