@@ -62,4 +62,4 @@ if uploaded_file is not None:
     if min(uni_score, major_score, nation_score) >= THRESH:
         st.success(f"✅ مطابق للشروط: {uploaded_file.name}")
     else:
-        st.error(f"❌ غير مطابق (واحد أو أكثر أقل من {THRESH}%)")
+st.error(f"❌ غير مطابق (واحد أو أكثر أقل من {THRESH}%)")
